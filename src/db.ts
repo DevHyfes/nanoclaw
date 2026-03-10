@@ -93,6 +93,21 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Add alpha_id column if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(`ALTER TABLE messages ADD COLUMN alpha_id TEXT`);
+    database.exec(`CREATE INDEX IF NOT EXISTS idx_alpha_id ON messages(alpha_id)`);
+  } catch {
+    /* column already exists */
+  }
+
+  // Add is_thread_root column if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(`ALTER TABLE messages ADD COLUMN is_thread_root INTEGER DEFAULT 0`);
+  } catch {
+    /* column already exists */
+  }
+
   // Add is_bot_message column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(
@@ -262,7 +277,7 @@ export function setLastGroupSync(): void {
  */
 export function storeMessage(msg: NewMessage): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, alpha_id, is_thread_root) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -272,6 +287,8 @@ export function storeMessage(msg: NewMessage): void {
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
+    msg.alpha_id ?? null,
+    msg.is_thread_root ? 1 : 0,
   );
 }
 
@@ -287,9 +304,11 @@ export function storeMessageDirect(msg: {
   timestamp: string;
   is_from_me: boolean;
   is_bot_message?: boolean;
+  alpha_id?: string;
+  is_thread_root?: boolean;
 }): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, alpha_id, is_thread_root) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -299,7 +318,50 @@ export function storeMessageDirect(msg: {
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
+    msg.alpha_id ?? null,
+    msg.is_thread_root ? 1 : 0,
   );
+}
+
+/**
+ * Returns the ISO timestamp of the most recent message stored for any JID
+ * matching the given prefix (e.g. "gchat:tgyvmSAAAAE" matches all threads too).
+ */
+export function getLastMessageTimestamp(jidPrefix: string): string | null {
+  // Filter to numeric IDs only — alphanumeric IDs were left by old DOM-based code
+  // and their timestamps are insertion times, not real message times.
+  const row = db
+    .prepare(
+      `SELECT MAX(timestamp) as ts FROM messages WHERE chat_jid LIKE ? AND id GLOB '[0-9]*'`,
+    )
+    .get(jidPrefix + '%') as { ts: string | null } | undefined;
+  return row?.ts ?? null;
+}
+
+/**
+ * Returns all known userId → displayName mappings from stored messages.
+ * Used to pre-populate the Google Chat channel's user name cache at startup.
+ */
+export function getKnownSenderNames(): Map<string, string> {
+  const rows = db
+    .prepare(`SELECT DISTINCT sender, sender_name FROM messages WHERE sender != '' AND sender_name != ''`)
+    .all() as Array<{ sender: string; sender_name: string }>;
+  const map = new Map<string, string>();
+  for (const row of rows) map.set(row.sender, row.sender_name);
+  return map;
+}
+
+/**
+ * Given a Google Chat thread alpha ID, return the chat_jid of the earliest
+ * message stored with that alpha_id. Used by sendThreadReply to determine
+ * whether the thread already exists (chat_jid is a thread JID) or whether
+ * we need to create it via hover+click (chat_jid is the parent space JID).
+ */
+export function getChatJidByAlphaId(alphaId: string): string | null {
+  const row = db
+    .prepare(`SELECT chat_jid FROM messages WHERE alpha_id = ? ORDER BY timestamp LIMIT 1`)
+    .get(alphaId) as { chat_jid: string } | undefined;
+  return row?.chat_jid ?? null;
 }
 
 export function getNewMessages(

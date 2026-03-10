@@ -6,6 +6,7 @@ import {
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
+  normalizeTriggerContent,
 } from './config.js';
 import './channels/index.js';
 import {
@@ -40,7 +41,8 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
-import { findChannel, formatMessages, formatOutbound } from './router.js';
+import { findChannel, formatMessages, formatOutbound, routeOutbound } from './router.js';
+import { isThreadJid, makeThreadJid, parseThreadJid } from './thread-jid.js';
 import {
   isSenderAllowed,
   isTriggerAllowed,
@@ -107,6 +109,18 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
     { jid, name: group.name, folder: group.folder },
     'Group registered',
   );
+
+  // Notify channels that support dynamic space addition (e.g. google_chat_browser)
+  if (jid.startsWith('gchat:')) {
+    for (const ch of channels) {
+      const withAddSpace = ch as { addSpace?: (jid: string) => Promise<void> };
+      if (typeof withAddSpace.addSpace === 'function') {
+        withAddSpace.addSpace(jid).catch((err) =>
+          logger.error({ err, jid }, 'Failed to dynamically add gchat space to channel'),
+        );
+      }
+    }
+  }
 }
 
 /**
@@ -139,7 +153,13 @@ export function _setRegisteredGroups(
  * Called by the GroupQueue when it's this group's turn.
  */
 async function processGroupMessages(chatJid: string): Promise<boolean> {
-  const group = registeredGroups[chatJid];
+  let group = registeredGroups[chatJid];
+
+  // Thread JID: fall back to parent group config
+  if (!group && isThreadJid(chatJid)) {
+    const { parentJid } = parseThreadJid(chatJid);
+    group = registeredGroups[parentJid];
+  }
   if (!group) return true;
 
   const channel = findChannel(channels, chatJid);
@@ -164,13 +184,39 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     const allowlistCfg = loadSenderAllowlist();
     const hasTrigger = missedMessages.some(
       (m) =>
-        TRIGGER_PATTERN.test(m.content.trim()) &&
+        TRIGGER_PATTERN.test(normalizeTriggerContent(m.content)) &&
         (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
     );
     if (!hasTrigger) return true;
   }
 
-  const prompt = formatMessages(missedMessages);
+  // Determine routing JID for outbound responses.
+  // For non-thread main-channel JIDs, anchor the reply in a thread of the
+  // last message (so Chiron never replies into the main chat stream).
+  // For thread JIDs, responses route back into that same thread.
+  let routingJid = chatJid;
+  if (!isThreadJid(chatJid)) {
+    const lastMsg = missedMessages[missedMessages.length - 1];
+    if (lastMsg?.id) {
+      routingJid = makeThreadJid(chatJid, lastMsg.id);
+      logger.debug({ chatJid, routingJid }, 'Routing response to thread of last message');
+    }
+  }
+
+  let prompt = formatMessages(missedMessages);
+
+  // Context bootstrap: on the very first invocation of a thread, prepend
+  // recent parent-channel messages so the agent understands context.
+  if (isThreadJid(chatJid) && !lastAgentTimestamp[chatJid]) {
+    const { parentJid } = parseThreadJid(chatJid);
+    const parentContext = getMessagesSince(parentJid, '', ASSISTANT_NAME).slice(-20);
+    if (parentContext.length > 0) {
+      const contextXml = formatMessages(parentContext)
+        .replace('<messages>', '<channel_context>\nRecent channel activity before this thread:')
+        .replace('</messages>', '</channel_context>');
+      prompt = `${contextXml}\n${prompt}`;
+    }
+  }
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -198,6 +244,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
+  // DISABLE_AGENT mode: advance cursor and return without running the agent.
+  // Used during Phase 1 testing to ingest messages without triggering responses.
+  if (process.env.DISABLE_AGENT === 'true') {
+    logger.info({ chatJid, messageCount: missedMessages.length }, 'DISABLE_AGENT: skipping agent invocation');
+    return true;
+  }
+
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
@@ -213,7 +266,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
-        await channel.sendMessage(chatJid, text);
+        await routeOutbound(channels, routingJid, text);
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -262,7 +315,7 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
-  const sessionId = sessions[group.folder];
+  const sessionId = sessions[chatJid];
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
@@ -293,8 +346,8 @@ async function runAgent(
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
-          sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
+          sessions[chatJid] = output.newSessionId;
+          setSession(chatJid, output.newSessionId);
         }
         await onOutput(output);
       }
@@ -317,8 +370,8 @@ async function runAgent(
     );
 
     if (output.newSessionId) {
-      sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
+      sessions[chatJid] = output.newSessionId;
+      setSession(chatJid, output.newSessionId);
     }
 
     if (output.status === 'error') {
@@ -392,7 +445,7 @@ async function startMessageLoop(): Promise<void> {
             const allowlistCfg = loadSenderAllowlist();
             const hasTrigger = groupMessages.some(
               (m) =>
-                TRIGGER_PATTERN.test(m.content.trim()) &&
+                TRIGGER_PATTERN.test(normalizeTriggerContent(m.content)) &&
                 (m.is_from_me ||
                   isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
             );
@@ -495,7 +548,21 @@ async function main(): Promise<void> {
           return;
         }
       }
+      // Ensure chat row exists (required by foreign key on messages table)
+      storeChatMetadata(chatJid, msg.timestamp, undefined, 'google_chat_browser');
       storeMessage(msg);
+
+      // Dynamically register thread JID in memory (not persisted to DB)
+      if (isThreadJid(chatJid) && !registeredGroups[chatJid]) {
+        const { parentJid } = parseThreadJid(chatJid);
+        const parentGroup = registeredGroups[parentJid];
+        if (parentGroup) {
+          registeredGroups[chatJid] = {
+            ...parentGroup,
+            requiresTrigger: false, // every thread message triggers the agent
+          };
+        }
+      }
     },
     onChatMetadata: (
       chatJid: string,
@@ -546,11 +613,7 @@ async function main(): Promise<void> {
     },
   });
   startIpcWatcher({
-    sendMessage: (jid, text) => {
-      const channel = findChannel(channels, jid);
-      if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text);
-    },
+    sendMessage: (jid, text) => routeOutbound(channels, jid, text),
     registeredGroups: () => registeredGroups,
     registerGroup,
     syncGroups: async (force: boolean) => {

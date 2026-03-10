@@ -1,0 +1,21 @@
+skill: google_chat_browser
+version: 1.0.0
+description: "Google Chat channel via Playwright browser automation"
+core_version: 0.1.0
+
+adds:
+  - src/channels/google-chat-browser.ts
+  - src/channels/google-chat-browser.test.ts
+  - setup/google-chat-browser-auth.ts
+
+modifies:
+  - src/channels/index.ts
+  - setup/index.ts
+
+structured:
+  npm_dependencies:
+    "playwright": "^1.50.0"
+
+conflicts: []
+depends: []
+test: "npx vitest run src/channels/google-chat-browser.test.ts"

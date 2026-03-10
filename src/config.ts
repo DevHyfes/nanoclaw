@@ -58,10 +58,20 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// Matches @Name anywhere in the message (not just at start) so that native
+// Google Chat @ mention picker works regardless of where in the message the
+// mention appears (e.g. "Hey @Chiron can you...").
 export const TRIGGER_PATTERN = new RegExp(
-  `^@${escapeRegex(ASSISTANT_NAME)}\\b`,
+  `@${escapeRegex(ASSISTANT_NAME)}\\b`,
   'i',
 );
+
+// Strip invisible Unicode characters that Google Chat's native @ mention picker
+// inserts around mention text (zero-width spaces, soft hyphens, etc.) before
+// testing against TRIGGER_PATTERN.
+export function normalizeTriggerContent(content: string): string {
+  return content.trim().replace(/[\u00AD\u200B-\u200D\uFEFF\u2060]/g, '');
+}
 
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default

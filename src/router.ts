@@ -1,4 +1,5 @@
 import { Channel, NewMessage } from './types.js';
+import { isThreadJid, parseThreadJid } from './thread-jid.js';
 
 export function escapeXml(s: string): string {
   if (!s) return '';
@@ -12,7 +13,7 @@ export function escapeXml(s: string): string {
 export function formatMessages(messages: NewMessage[]): string {
   const lines = messages.map(
     (m) =>
-      `<message sender="${escapeXml(m.sender_name)}" time="${m.timestamp}">${escapeXml(m.content)}</message>`,
+      `<message id="${escapeXml(m.id)}" sender="${escapeXml(m.sender_name)}" time="${m.timestamp}">${escapeXml(m.content)}</message>`,
   );
   return `<messages>\n${lines.join('\n')}\n</messages>`;
 }
@@ -32,6 +33,16 @@ export function routeOutbound(
   jid: string,
   text: string,
 ): Promise<void> {
+  if (isThreadJid(jid)) {
+    const { parentJid, threadRootId } = parseThreadJid(jid);
+    const channel = channels.find((c) => c.ownsJid(parentJid) && c.isConnected());
+    if (!channel) throw new Error(`No channel for parent JID: ${parentJid}`);
+    const gcb = channel as { sendThreadReply?: (j: string, t: string, id: string) => Promise<void> };
+    if (typeof gcb.sendThreadReply === 'function') {
+      return gcb.sendThreadReply(parentJid, text, threadRootId);
+    }
+    return channel.sendMessage(parentJid, text);
+  }
   const channel = channels.find((c) => c.ownsJid(jid) && c.isConnected());
   if (!channel) throw new Error(`No channel for JID: ${jid}`);
   return channel.sendMessage(jid, text);

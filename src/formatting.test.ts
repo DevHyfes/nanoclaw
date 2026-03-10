@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from './config.js';
+import { ASSISTANT_NAME, TRIGGER_PATTERN, normalizeTriggerContent } from './config.js';
 import {
   escapeXml,
   formatMessages,
@@ -62,7 +62,7 @@ describe('formatMessages', () => {
     const result = formatMessages([makeMsg()]);
     expect(result).toBe(
       '<messages>\n' +
-        '<message sender="Alice" time="2024-01-01T00:00:00.000Z">hello</message>\n' +
+        '<message id="1" sender="Alice" time="2024-01-01T00:00:00.000Z">hello</message>\n' +
         '</messages>',
     );
   });
@@ -120,8 +120,9 @@ describe('TRIGGER_PATTERN', () => {
     expect(TRIGGER_PATTERN.test(`@${upper} hello`)).toBe(true);
   });
 
-  it('does not match when not at start of message', () => {
-    expect(TRIGGER_PATTERN.test(`hello @${name}`)).toBe(false);
+  it('matches @name mid-message (native picker style)', () => {
+    expect(TRIGGER_PATTERN.test(`hey @${name} can you help`)).toBe(true);
+    expect(TRIGGER_PATTERN.test(`hello @${name}`)).toBe(true);
   });
 
   it('does not match partial name like @NameExtra (word boundary)', () => {
@@ -137,8 +138,32 @@ describe('TRIGGER_PATTERN', () => {
   });
 
   it('matches with leading whitespace after trim', () => {
-    // The actual usage trims before testing: TRIGGER_PATTERN.test(m.content.trim())
     expect(TRIGGER_PATTERN.test(`@${name} hey`.trim())).toBe(true);
+  });
+});
+
+// --- normalizeTriggerContent ---
+
+describe('normalizeTriggerContent', () => {
+  const name = ASSISTANT_NAME;
+
+  it('strips zero-width spaces inserted by Google Chat mention picker', () => {
+    // Picker may wrap the mention in \u200B characters
+    const withZWS = `\u200B@${name}\u200B help`;
+    expect(TRIGGER_PATTERN.test(normalizeTriggerContent(withZWS))).toBe(true);
+  });
+
+  it('strips soft hyphens and other invisible chars', () => {
+    const withInvisible = `\u00AD@${name} help`;
+    expect(TRIGGER_PATTERN.test(normalizeTriggerContent(withInvisible))).toBe(true);
+  });
+
+  it('trims whitespace', () => {
+    expect(normalizeTriggerContent(`  @${name} hey  `)).toBe(`@${name} hey`);
+  });
+
+  it('leaves normal text unchanged', () => {
+    expect(normalizeTriggerContent(`@${name} help me`)).toBe(`@${name} help me`);
   });
 });
 

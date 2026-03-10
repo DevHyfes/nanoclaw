@@ -47,6 +47,12 @@ When you learn something important:
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
+## Conversation Isolation
+
+Each thread is a separate conversation. When you respond, you are responding within
+that specific conversation — routing to the correct thread is handled automatically.
+You do not need to use any special prefixes.
+
 ## Message Formatting
 
 NEVER use markdown. Only use WhatsApp/Telegram formatting:
