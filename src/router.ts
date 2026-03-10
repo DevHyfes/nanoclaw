@@ -1,5 +1,6 @@
 import { Channel, NewMessage } from './types.js';
 import { isThreadJid, parseThreadJid } from './thread-jid.js';
+import { formatLocalTime } from './timezone.js';
 
 export function escapeXml(s: string): string {
   if (!s) return '';
@@ -10,12 +11,18 @@ export function escapeXml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
-export function formatMessages(messages: NewMessage[]): string {
-  const lines = messages.map(
-    (m) =>
-      `<message id="${escapeXml(m.id)}" sender="${escapeXml(m.sender_name)}" time="${m.timestamp}">${escapeXml(m.content)}</message>`,
-  );
-  return `<messages>\n${lines.join('\n')}\n</messages>`;
+export function formatMessages(
+  messages: NewMessage[],
+  timezone: string,
+): string {
+  const lines = messages.map((m) => {
+    const displayTime = formatLocalTime(m.timestamp, timezone);
+    return `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}">${escapeXml(m.content)}</message>`;
+  });
+
+  const header = `<context timezone="${escapeXml(timezone)}" />\n`;
+
+  return `${header}<messages>\n${lines.join('\n')}\n</messages>`;
 }
 
 export function stripInternalTags(text: string): string {

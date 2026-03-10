@@ -3,11 +3,14 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  CREDENTIAL_PROXY_PORT,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
+  TIMEZONE,
   TRIGGER_PATTERN,
   normalizeTriggerContent,
 } from './config.js';
+import { startCredentialProxy } from './credential-proxy.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -22,6 +25,7 @@ import {
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
+  PROXY_BIND_HOST,
 } from './container-runtime.js';
 import {
   getAllChats,
@@ -30,6 +34,7 @@ import {
   getAllTasks,
   getMessagesSince,
   getNewMessages,
+  getRegisteredGroup,
   getRouterState,
   initDatabase,
   setRegisteredGroup,
@@ -216,7 +221,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   }
 
-  let prompt = formatMessages(missedMessages);
+  let prompt = formatMessages(missedMessages, TIMEZONE);
 
   // Context bootstrap: on the very first invocation of a thread, prepend
   // recent parent-channel messages so the agent understands context.
@@ -226,7 +231,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       -20,
     );
     if (parentContext.length > 0) {
-      const contextXml = formatMessages(parentContext)
+      const contextXml = formatMessages(parentContext, TIMEZONE)
         .replace(
           '<messages>',
           '<channel_context>\nRecent channel activity before this thread:',
@@ -482,7 +487,7 @@ async function startMessageLoop(): Promise<void> {
           );
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
-          const formatted = formatMessages(messagesToSend);
+          const formatted = formatMessages(messagesToSend, TIMEZONE);
 
           if (queue.sendMessage(chatJid, formatted)) {
             logger.debug(
@@ -540,9 +545,16 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
 
+  // Start credential proxy (containers route API calls through this)
+  const proxyServer = await startCredentialProxy(
+    CREDENTIAL_PROXY_PORT,
+    PROXY_BIND_HOST,
+  );
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    proxyServer.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
