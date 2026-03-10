@@ -96,14 +96,18 @@ function createSchema(database: Database.Database): void {
   // Add alpha_id column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(`ALTER TABLE messages ADD COLUMN alpha_id TEXT`);
-    database.exec(`CREATE INDEX IF NOT EXISTS idx_alpha_id ON messages(alpha_id)`);
+    database.exec(
+      `CREATE INDEX IF NOT EXISTS idx_alpha_id ON messages(alpha_id)`,
+    );
   } catch {
     /* column already exists */
   }
 
   // Add is_thread_root column if it doesn't exist (migration for existing DBs)
   try {
-    database.exec(`ALTER TABLE messages ADD COLUMN is_thread_root INTEGER DEFAULT 0`);
+    database.exec(
+      `ALTER TABLE messages ADD COLUMN is_thread_root INTEGER DEFAULT 0`,
+    );
   } catch {
     /* column already exists */
   }
@@ -344,7 +348,9 @@ export function getLastMessageTimestamp(jidPrefix: string): string | null {
  */
 export function getKnownSenderNames(): Map<string, string> {
   const rows = db
-    .prepare(`SELECT DISTINCT sender, sender_name FROM messages WHERE sender != '' AND sender_name != ''`)
+    .prepare(
+      `SELECT DISTINCT sender, sender_name FROM messages WHERE sender != '' AND sender_name != ''`,
+    )
     .all() as Array<{ sender: string; sender_name: string }>;
   const map = new Map<string, string>();
   for (const row of rows) map.set(row.sender, row.sender_name);
@@ -359,7 +365,9 @@ export function getKnownSenderNames(): Map<string, string> {
  */
 export function getChatJidByAlphaId(alphaId: string): string | null {
   const row = db
-    .prepare(`SELECT chat_jid FROM messages WHERE alpha_id = ? ORDER BY timestamp LIMIT 1`)
+    .prepare(
+      `SELECT chat_jid FROM messages WHERE alpha_id = ? ORDER BY timestamp LIMIT 1`,
+    )
     .get(alphaId) as { chat_jid: string } | undefined;
   return row?.chat_jid ?? null;
 }

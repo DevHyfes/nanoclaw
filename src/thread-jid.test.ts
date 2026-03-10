@@ -8,7 +8,9 @@ import {
 
 describe('makeThreadJid', () => {
   it('combines parentJid and threadRootId with separator', () => {
-    expect(makeThreadJid('gchat:AAA', 'xyz123')).toBe('gchat:AAA:thread:xyz123');
+    expect(makeThreadJid('gchat:AAA', 'xyz123')).toBe(
+      'gchat:AAA:thread:xyz123',
+    );
   });
 
   it('uses THREAD_SEP constant', () => {

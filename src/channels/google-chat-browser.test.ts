@@ -327,7 +327,11 @@ describe('GoogleChatBrowserChannel', () => {
     it('delivers thread messages under thread JID with clean content', async () => {
       const onMessage = vi.fn();
       const groups = { 'gchat:AAA': testGroup() };
-      const opts = { onMessage, onChatMetadata: vi.fn(), registeredGroups: vi.fn().mockReturnValue(groups) };
+      const opts = {
+        onMessage,
+        onChatMetadata: vi.fn(),
+        registeredGroups: vi.fn().mockReturnValue(groups),
+      };
 
       const ch = new GoogleChatBrowserChannel(opts);
       await ch.connect();
@@ -344,7 +348,12 @@ describe('GoogleChatBrowserChannel', () => {
       ]);
       // Second $$eval: thread messages from third pane (new message after msg-001)
       mockPage.$$eval.mockResolvedValueOnce([
-        { id: 'msg-002', text: 'Thread reply here', sender: 'Bob', isFromBot: false },
+        {
+          id: 'msg-002',
+          text: 'Thread reply here',
+          sender: 'Bob',
+          isFromBot: false,
+        },
       ]);
 
       await (ch as any).pollHome();
@@ -365,7 +374,11 @@ describe('GoogleChatBrowserChannel', () => {
     it('initializes threadLastSeenIds on first encounter without delivering', async () => {
       const onMessage = vi.fn();
       const groups = { 'gchat:AAA': testGroup() };
-      const opts = { onMessage, onChatMetadata: vi.fn(), registeredGroups: vi.fn().mockReturnValue(groups) };
+      const opts = {
+        onMessage,
+        onChatMetadata: vi.fn(),
+        registeredGroups: vi.fn().mockReturnValue(groups),
+      };
 
       const ch = new GoogleChatBrowserChannel(opts);
       await ch.connect();
@@ -385,7 +398,9 @@ describe('GoogleChatBrowserChannel', () => {
       // No messages delivered — just initialization
       expect(onMessage).not.toHaveBeenCalled();
       // But threadLastSeenIds should now be set using the thread JID as key
-      expect((ch as any).threadLastSeenIds.has('gchat:AAA:thread:thread1')).toBe(true);
+      expect(
+        (ch as any).threadLastSeenIds.has('gchat:AAA:thread:thread1'),
+      ).toBe(true);
 
       await ch.disconnect();
     });
@@ -415,7 +430,11 @@ describe('GoogleChatBrowserChannel', () => {
     it('tracks threadLastSeenIds and skips already-seen messages', async () => {
       const onMessage = vi.fn();
       const groups = { 'gchat:AAA': testGroup() };
-      const opts = { onMessage, onChatMetadata: vi.fn(), registeredGroups: vi.fn().mockReturnValue(groups) };
+      const opts = {
+        onMessage,
+        onChatMetadata: vi.fn(),
+        registeredGroups: vi.fn().mockReturnValue(groups),
+      };
 
       const ch = new GoogleChatBrowserChannel(opts);
       await ch.connect();
@@ -443,7 +462,10 @@ describe('GoogleChatBrowserChannel', () => {
       const groups = { 'gchat:AAA': testGroup() };
       const ch = new GoogleChatBrowserChannel(makeOpts(groups));
       await ch.connect();
-      expect(updateChatName).toHaveBeenCalledWith('gchat:AAA', 'Engineering Room');
+      expect(updateChatName).toHaveBeenCalledWith(
+        'gchat:AAA',
+        'Engineering Room',
+      );
       await ch.disconnect();
     });
   });

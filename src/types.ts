@@ -51,7 +51,7 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
-  alpha_id?: string;     // message's own alphanumeric ID (Google Chat only)
+  alpha_id?: string; // message's own alphanumeric ID (Google Chat only)
   is_thread_root?: boolean; // true when this message started a thread
 }
 

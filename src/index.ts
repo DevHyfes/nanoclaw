@@ -41,7 +41,12 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
-import { findChannel, formatMessages, formatOutbound, routeOutbound } from './router.js';
+import {
+  findChannel,
+  formatMessages,
+  formatOutbound,
+  routeOutbound,
+} from './router.js';
 import { isThreadJid, makeThreadJid, parseThreadJid } from './thread-jid.js';
 import {
   isSenderAllowed,
@@ -115,9 +120,14 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
     for (const ch of channels) {
       const withAddSpace = ch as { addSpace?: (jid: string) => Promise<void> };
       if (typeof withAddSpace.addSpace === 'function') {
-        withAddSpace.addSpace(jid).catch((err) =>
-          logger.error({ err, jid }, 'Failed to dynamically add gchat space to channel'),
-        );
+        withAddSpace
+          .addSpace(jid)
+          .catch((err) =>
+            logger.error(
+              { err, jid },
+              'Failed to dynamically add gchat space to channel',
+            ),
+          );
       }
     }
   }
@@ -199,7 +209,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     const lastMsg = missedMessages[missedMessages.length - 1];
     if (lastMsg?.id) {
       routingJid = makeThreadJid(chatJid, lastMsg.id);
-      logger.debug({ chatJid, routingJid }, 'Routing response to thread of last message');
+      logger.debug(
+        { chatJid, routingJid },
+        'Routing response to thread of last message',
+      );
     }
   }
 
@@ -209,10 +222,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // recent parent-channel messages so the agent understands context.
   if (isThreadJid(chatJid) && !lastAgentTimestamp[chatJid]) {
     const { parentJid } = parseThreadJid(chatJid);
-    const parentContext = getMessagesSince(parentJid, '', ASSISTANT_NAME).slice(-20);
+    const parentContext = getMessagesSince(parentJid, '', ASSISTANT_NAME).slice(
+      -20,
+    );
     if (parentContext.length > 0) {
       const contextXml = formatMessages(parentContext)
-        .replace('<messages>', '<channel_context>\nRecent channel activity before this thread:')
+        .replace(
+          '<messages>',
+          '<channel_context>\nRecent channel activity before this thread:',
+        )
         .replace('</messages>', '</channel_context>');
       prompt = `${contextXml}\n${prompt}`;
     }
@@ -247,7 +265,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // DISABLE_AGENT mode: advance cursor and return without running the agent.
   // Used during Phase 1 testing to ingest messages without triggering responses.
   if (process.env.DISABLE_AGENT === 'true') {
-    logger.info({ chatJid, messageCount: missedMessages.length }, 'DISABLE_AGENT: skipping agent invocation');
+    logger.info(
+      { chatJid, messageCount: missedMessages.length },
+      'DISABLE_AGENT: skipping agent invocation',
+    );
     return true;
   }
 
@@ -549,7 +570,12 @@ async function main(): Promise<void> {
         }
       }
       // Ensure chat row exists (required by foreign key on messages table)
-      storeChatMetadata(chatJid, msg.timestamp, undefined, 'google_chat_browser');
+      storeChatMetadata(
+        chatJid,
+        msg.timestamp,
+        undefined,
+        'google_chat_browser',
+      );
       storeMessage(msg);
 
       // Dynamically register thread JID in memory (not persisted to DB)

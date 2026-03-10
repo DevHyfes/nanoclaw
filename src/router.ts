@@ -35,9 +35,13 @@ export function routeOutbound(
 ): Promise<void> {
   if (isThreadJid(jid)) {
     const { parentJid, threadRootId } = parseThreadJid(jid);
-    const channel = channels.find((c) => c.ownsJid(parentJid) && c.isConnected());
+    const channel = channels.find(
+      (c) => c.ownsJid(parentJid) && c.isConnected(),
+    );
     if (!channel) throw new Error(`No channel for parent JID: ${parentJid}`);
-    const gcb = channel as { sendThreadReply?: (j: string, t: string, id: string) => Promise<void> };
+    const gcb = channel as {
+      sendThreadReply?: (j: string, t: string, id: string) => Promise<void>;
+    };
     if (typeof gcb.sendThreadReply === 'function') {
       return gcb.sendThreadReply(parentJid, text, threadRootId);
     }

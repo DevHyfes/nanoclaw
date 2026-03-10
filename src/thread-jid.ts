@@ -8,7 +8,10 @@ export function isThreadJid(jid: string): boolean {
   return jid.includes(THREAD_SEP);
 }
 
-export function parseThreadJid(jid: string): { parentJid: string; threadRootId: string } {
+export function parseThreadJid(jid: string): {
+  parentJid: string;
+  threadRootId: string;
+} {
   const idx = jid.lastIndexOf(THREAD_SEP);
   return {
     parentJid: jid.slice(0, idx),

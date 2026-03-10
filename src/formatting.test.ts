@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN, normalizeTriggerContent } from './config.js';
+import {
+  ASSISTANT_NAME,
+  TRIGGER_PATTERN,
+  normalizeTriggerContent,
+} from './config.js';
 import {
   escapeXml,
   formatMessages,
@@ -155,7 +159,9 @@ describe('normalizeTriggerContent', () => {
 
   it('strips soft hyphens and other invisible chars', () => {
     const withInvisible = `\u00AD@${name} help`;
-    expect(TRIGGER_PATTERN.test(normalizeTriggerContent(withInvisible))).toBe(true);
+    expect(TRIGGER_PATTERN.test(normalizeTriggerContent(withInvisible))).toBe(
+      true,
+    );
   });
 
   it('trims whitespace', () => {
@@ -163,7 +169,9 @@ describe('normalizeTriggerContent', () => {
   });
 
   it('leaves normal text unchanged', () => {
-    expect(normalizeTriggerContent(`@${name} help me`)).toBe(`@${name} help me`);
+    expect(normalizeTriggerContent(`@${name} help me`)).toBe(
+      `@${name} help me`,
+    );
   });
 });
 
