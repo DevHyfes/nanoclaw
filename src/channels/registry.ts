@@ -5,9 +5,23 @@ import {
   RegisteredGroup,
 } from '../types.js';
 
+export type OnBotMessage = (msg: {
+  id: string;
+  chat_jid: string;
+  sender: string;
+  sender_name: string;
+  content: string;
+  timestamp: string;
+  is_from_me: boolean;
+  is_bot_message?: boolean;
+  alpha_id?: string;
+  is_thread_root?: boolean;
+}) => void;
+
 export interface ChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
+  onBotMessage: OnBotMessage;
   registeredGroups: () => Record<string, RegisteredGroup>;
 }
 

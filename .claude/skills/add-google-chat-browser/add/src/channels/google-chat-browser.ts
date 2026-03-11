@@ -3,7 +3,11 @@ import fs from 'fs';
 import path from 'path';
 
 import { STORE_DIR } from '../config.js';
-import { getLastMessageTimestamp, getKnownSenderNames, storeChatMetadata, storeMessageDirect, updateChatName } from '../db.js';
+import {
+  getLastMessageTimestamp,
+  getKnownSenderNames,
+  updateChatName,
+} from '../db.js';
 import { logger } from '../logger.js';
 import { makeThreadJid } from '../thread-jid.js';
 import {
@@ -28,7 +32,8 @@ const DEFAULT_LOOKBACK_MICROS = 24 * 60 * 60 * 1000 * 1000; // 24 hours
 // DOM selectors — kept for DOM-based sending only (Phase 2 will remove these)
 const SELECTORS = {
   // Main chat input — scoped to c-wiz without a data-topic-id (not a thread pane)
-  messageInput: 'c-wiz:not([data-topic-id]) [jsname="yrriRe"][contenteditable="true"]',
+  messageInput:
+    'c-wiz:not([data-topic-id]) [jsname="yrriRe"][contenteditable="true"]',
   // Thread reply input — scoped to the specific thread's c-wiz by topic ID
   threadInput: (topicId: string) =>
     `c-wiz[data-topic-id="${topicId}"] [jsname="yrriRe"][contenteditable="true"]`,
@@ -69,19 +74,30 @@ function buildInlineSpaceRef(spaceId: string, isDm: boolean): any[] {
 }
 
 /**
- * Build a list_topics request body for all recent messages in a space.
- * `since` is a microsecond timestamp — only messages created after this are returned.
+ * Build a list_topics request body for all messages in a space up to `cursor`.
+ *
+ * `cursor` is a microsecond timestamp used as a BACKWARD pagination anchor:
+ * the API returns the 20 most recently active topics with last-activity ≤ cursor.
+ *
+ * To fetch the most recent page: pass cursor = nowMicros().
+ * To page backward: pass cursor = (oldest_topic_last_msg_id - 1) from previous page.
+ *
+ * `sessionNow` is fixed for the lifetime of a catch-up session (used for body[8/9]).
  */
-function buildListTopicsBody(spaceRef: any[], since: number): any[] {
+function buildListTopicsBody(
+  spaceRef: any[],
+  cursor: number,
+  sessionNow: number,
+): any[] {
   const body: any[] = new Array(100).fill(null);
   body[1] = 50;
-  body[3] = [since];
-  body[4] = [3, 1, 4];
+  body[3] = [cursor];
+  body[4] = [3, 1, 4]; // '1' requests sender display names in the response
   body[5] = 1000;
   body[6] = 50;
   body[7] = spaceRef;
-  body[8] = [nowMicros()];
-  body[9] = [since];
+  body[8] = [sessionNow];
+  body[9] = [sessionNow];
   body[10] = 2;
   return body;
 }
@@ -95,7 +111,7 @@ function buildThreadListTopicsBody(
   spaceId: string,
   isDm: boolean,
   threadAlphaId: string,
-  since: number,
+  sessionNow: number,
 ): any[] {
   const body: any[] = new Array(100).fill(null);
   const inlineRef = buildInlineSpaceRef(spaceId, isDm);
@@ -105,15 +121,15 @@ function buildThreadListTopicsBody(
   body[5] = 1000;
   body[6] = 50;
   body[7] = spaceRef;
-  body[8] = [nowMicros()];
-  body[9] = since ? [since] : null;
+  body[8] = [sessionNow];
+  body[9] = [sessionNow];
   body[10] = 2;
   return body;
 }
 
 interface ParsedMsg {
-  msgId: string;         // numeric string, e.g. "1772862943193823"
-  msgAlphaId: string;    // this message's own alphanumeric ID (unique per message)
+  msgId: string; // numeric string, e.g. "1772862943193823"
+  msgAlphaId: string; // this message's own alphanumeric ID (unique per message)
   threadAlphaId: string; // thread ROOT alpha ID (= msgAlphaId when this IS the root)
   isThreadRoot: boolean; // true when msgAlphaId === threadAlphaId
   spaceId: string;
@@ -121,7 +137,7 @@ interface ParsedMsg {
   senderUserId: string;
   senderName: string;
   text: string;
-  timestamp: string;    // ISO derived from msgId
+  timestamp: string; // ISO derived from msgId
 }
 
 /**
@@ -176,7 +192,10 @@ function parseBrowserChannelBody(body: string): Array<[number, any]> {
     if (nl === -1) break;
     const lenStr = body.slice(i, nl).trim();
     const len = parseInt(lenStr, 10);
-    if (isNaN(len) || len <= 0) { i = nl + 1; continue; }
+    if (isNaN(len) || len <= 0) {
+      i = nl + 1;
+      continue;
+    }
     const start = nl + 1;
     const end = start + len;
     if (end > body.length) break;
@@ -190,7 +209,9 @@ function parseBrowserChannelBody(body: string): Array<[number, any]> {
           }
         }
       }
-    } catch { /* skip malformed chunks */ }
+    } catch {
+      /* skip malformed chunks */
+    }
     // Next chunk starts immediately after the JSON bytes (no separator)
     i = end;
   }
@@ -217,7 +238,12 @@ function extractWebChannelMessages(data: any): ParsedMsg[] {
   const results: ParsedMsg[] = [];
 
   // data[0][0] = room array (type-6 room events have 3 levels of wrapping)
-  if (!Array.isArray(data) || !Array.isArray(data[0]) || !Array.isArray(data[0][0])) return results;
+  if (
+    !Array.isArray(data) ||
+    !Array.isArray(data[0]) ||
+    !Array.isArray(data[0][0])
+  )
+    return results;
   const roomArr = data[0][0];
 
   // Space ref at roomArr[0]
@@ -228,7 +254,11 @@ function extractWebChannelMessages(data: any): ParsedMsg[] {
   let isDm: boolean;
 
   // DM: [null, null, ["spaceId"]]
-  if (spaceRef[0] === null && Array.isArray(spaceRef[2]) && typeof spaceRef[2][0] === 'string') {
+  if (
+    spaceRef[0] === null &&
+    Array.isArray(spaceRef[2]) &&
+    typeof spaceRef[2][0] === 'string'
+  ) {
     spaceId = spaceRef[2][0];
     isDm = true;
   }
@@ -236,8 +266,7 @@ function extractWebChannelMessages(data: any): ParsedMsg[] {
   else if (Array.isArray(spaceRef[0]) && typeof spaceRef[0][0] === 'string') {
     spaceId = spaceRef[0][0];
     isDm = false;
-  }
-  else {
+  } else {
     return results;
   }
 
@@ -263,7 +292,8 @@ function extractWebChannelMessages(data: any): ParsedMsg[] {
     const threadRefPair = msgData[0];
     if (!Array.isArray(threadRefPair)) continue;
     // Message's own alpha ID — unique per message
-    const msgAlphaId = typeof threadRefPair[1] === 'string' ? threadRefPair[1] : '';
+    const msgAlphaId =
+      typeof threadRefPair[1] === 'string' ? threadRefPair[1] : '';
     // Thread ROOT alpha ID — from the 4-element ref inside threadRefPair[0]
     const threadRootInfo = Array.isArray(threadRefPair[0])
       ? extractThreadInfo(threadRefPair[0])
@@ -274,7 +304,9 @@ function extractWebChannelMessages(data: any): ParsedMsg[] {
     // Sender: msgData[1] = [["userId"]]
     const senderArr = msgData[1];
     const senderUserId =
-      Array.isArray(senderArr) && Array.isArray(senderArr[0]) ? (senderArr[0][0] ?? '') : '';
+      Array.isArray(senderArr) && Array.isArray(senderArr[0])
+        ? (senderArr[0][0] ?? '')
+        : '';
 
     // Message ID: msgData[2]
     const rawMsgId = typeof msgData[2] === 'string' ? msgData[2] : '';
@@ -314,7 +346,12 @@ function extractWebChannelMessages(data: any): ParsedMsg[] {
  */
 function extractWebChannelSenderNames(data: any): Map<string, string> {
   const names = new Map<string, string>();
-  if (!Array.isArray(data) || !Array.isArray(data[0]) || !Array.isArray(data[0][0])) return names;
+  if (
+    !Array.isArray(data) ||
+    !Array.isArray(data[0]) ||
+    !Array.isArray(data[0][0])
+  )
+    return names;
   const roomArr = data[0][0];
   const innerEvents = roomArr[7];
   if (!Array.isArray(innerEvents)) return names;
@@ -342,55 +379,30 @@ function extractWebChannelSenderNames(data: any): Map<string, string> {
 }
 
 /**
- * Extract message IDs from participant delta records in a list_topics response.
- *
- * data[0][6][1] contains participant "last activity" records with format:
- *   [null, lastMsgId, userProfile]
- *
- * These tell us the ID of the last message in threads that had activity since
- * the cursor. When a NEW thread (created after cursor) contains messages, those
- * messages do NOT appear in data[0][1] — only the participant record appears.
- * We use these IDs to detect new messages and trigger a secondary fetch.
- *
- * Returns numeric message IDs that are strictly greater than currentCursor.
- */
-function extractDeltaNewMsgIds(raw: any, currentCursor: string): string[] {
-  if (!Array.isArray(raw) || !Array.isArray(raw[0])) return [];
-  const header = raw[0];
-  if (header[0] !== 'dfe.t.lt') return [];
-  if (!Array.isArray(header[6]) || !Array.isArray(header[6][1])) return [];
-
-  const result: string[] = [];
-  for (const entry of header[6][1]) {
-    // Participant record: [null, lastMsgId, userProfile]
-    if (!Array.isArray(entry) || typeof entry[1] !== 'string') continue;
-    const msgId = entry[1];
-    if (!/^\d{14,19}$/.test(msgId)) continue;
-    if (!currentCursor || BigInt(msgId) > BigInt(currentCursor)) {
-      result.push(msgId);
-    }
-  }
-  return result;
-}
-
-/**
  * Parse messages out of a list_topics JSON response.
  *
  * Response layout (header = raw[0]):
  *   header[0] = 'dfe.t.lt'
- *   header[1] = historical topics array (null when there are no historical topics)
- *   header[2] = next-cursor array (e.g. [1772924598268607])
- *   header[3] = prev-cursor array
- *   header[6] = [something, [participantRecords...]]  ← delta: participant last-activity
- *
- * Note: header[6][1] contains participant metadata, NOT message content. New message
- * content for threads created after the cursor is fetched via a secondary call.
+ *   header[1] = topics array — the 20 most recently active topics with last-activity ≤ cursor
+ *   header[2] = next-cursor (latest message timestamp seen in this response)
+ *   header[3] = prev-cursor (the cursor used in the request)
+ *   header[6] = [flag, [participantRecords...]] — per-user last-read timestamps; NOT message IDs
  *
  * Returns parsed messages, the max numeric message ID seen in the raw response,
  * AND the API-provided next cursor (header[2][0]) for the subsequent poll.
  */
-function parseListTopicsMessages(raw: any): { msgs: ParsedMsg[]; maxRawMsgId: string; apiNextCursor: string; userNames: Map<string, string> } {
-  const empty = { msgs: [], maxRawMsgId: '', apiNextCursor: '', userNames: new Map<string, string>() };
+function parseListTopicsMessages(raw: any): {
+  msgs: ParsedMsg[];
+  maxRawMsgId: string;
+  minTopicSortId: string;
+  userNames: Map<string, string>;
+} {
+  const empty = {
+    msgs: [],
+    maxRawMsgId: '',
+    minTopicSortId: '',
+    userNames: new Map<string, string>(),
+  };
   if (!Array.isArray(raw) || !Array.isArray(raw[0])) return empty;
   const header = raw[0];
   if (header[0] !== 'dfe.t.lt') return empty;
@@ -401,21 +413,28 @@ function parseListTopicsMessages(raw: any): { msgs: ParsedMsg[]; maxRawMsgId: st
   if (!Array.isArray(header[1])) return empty;
   const topicsArray = header[1];
 
-  // API-provided cursor for the next poll (header[2][0])
-  const apiNextCursor =
-    Array.isArray(header[2]) && typeof header[2][0] === 'string' && /^\d{14,19}$/.test(header[2][0])
-      ? header[2][0]
-      : '';
-
   const results: ParsedMsg[] = [];
   const userNames = new Map<string, string>();
   let maxRawMsgId = '';
+  let minTopicSortId = ''; // topic[1] = last-activity sort key — used for backward paging cursor
 
   for (const topic of topicsArray) {
     if (!Array.isArray(topic)) continue;
 
     // topic[0] = thread ref (3 or 4-element format)
     const topicThreadInfo = extractThreadInfo(topic[0]);
+
+    // topic[1] = last-activity sort key for this topic (the newest message ID in the thread).
+    // This is what the API sorts by, so it's the correct backward-paging cursor.
+    const topicSortId =
+      typeof topic[1] === 'string' && /^\d{14,19}$/.test(topic[1])
+        ? topic[1]
+        : '';
+    if (topicSortId) {
+      if (!minTopicSortId || BigInt(topicSortId) < BigInt(minTopicSortId)) {
+        minTopicSortId = topicSortId;
+      }
+    }
 
     // topic[6] = messages array
     const messagesArr = topic[6];
@@ -444,19 +463,25 @@ function parseListTopicsMessages(raw: any): { msgs: ParsedMsg[]; maxRawMsgId: st
       // Fallback: if msg[0] is wrapped one level deeper, try msgThreadRef[0][1]
       const msgAlphaId: string =
         (typeof msgThreadRef?.[1] === 'string' ? msgThreadRef[1] : null) ??
-        (typeof msgThreadRef?.[0]?.[1] === 'string' ? msgThreadRef[0][1] : null) ??
+        (typeof msgThreadRef?.[0]?.[1] === 'string'
+          ? msgThreadRef[0][1]
+          : null) ??
         '';
 
       // If topicThreadInfo didn't give us space info, extract from the 4-element ref
       if ((!spaceId || !threadAlphaId) && Array.isArray(msgThreadRef)) {
         // Try msgThreadRef[0] as the 4-element ref, then msgThreadRef[0][0]
-        const ref4 = Array.isArray(msgThreadRef[0]) && Array.isArray(msgThreadRef[0][0])
-          ? msgThreadRef[0][0]
-          : msgThreadRef[0];
+        const ref4 =
+          Array.isArray(msgThreadRef[0]) && Array.isArray(msgThreadRef[0][0])
+            ? msgThreadRef[0][0]
+            : msgThreadRef[0];
         const inner = extractThreadInfo(ref4);
         if (inner) {
           if (!threadAlphaId) threadAlphaId = inner.alphaId;
-          if (!spaceId) { spaceId = inner.spaceId; isDm = inner.isDm; }
+          if (!spaceId) {
+            spaceId = inner.spaceId;
+            isDm = inner.isDm;
+          }
         }
       }
 
@@ -497,16 +522,12 @@ function parseListTopicsMessages(raw: any): { msgs: ParsedMsg[]; maxRawMsgId: st
     }
   }
 
-  return { msgs: results, maxRawMsgId, apiNextCursor, userNames };
+  return { msgs: results, maxRawMsgId, minTopicSortId, userNames };
 }
 
 // ─── Channel class ────────────────────────────────────────────────────────────
 
-export interface GoogleChatBrowserChannelOpts {
-  onMessage: OnInboundMessage;
-  onChatMetadata: OnChatMetadata;
-  registeredGroups: () => Record<string, RegisteredGroup>;
-}
+export interface GoogleChatBrowserChannelOpts extends ChannelOpts {}
 
 export class GoogleChatBrowserChannel implements Channel {
   name = 'google_chat_browser';
@@ -550,13 +571,20 @@ export class GoogleChatBrowserChannel implements Channel {
   // ── Public interface ──────────────────────────────────────────────────────
 
   async connect(): Promise<void> {
-    logger.info({ userDataDir: USER_DATA_DIR }, 'Google Chat Browser: launching');
+    logger.info(
+      { userDataDir: USER_DATA_DIR },
+      'Google Chat Browser: launching',
+    );
     fs.mkdirSync(USER_DATA_DIR, { recursive: true });
 
     // Remove stale lock file
     const lockFile = path.join(USER_DATA_DIR, 'SingletonLock');
     if (fs.existsSync(lockFile)) {
-      try { fs.unlinkSync(lockFile); } catch { /* ignore */ }
+      try {
+        fs.unlinkSync(lockFile);
+      } catch {
+        /* ignore */
+      }
     }
 
     this.context = await chromium.launchPersistentContext(USER_DATA_DIR, {
@@ -575,7 +603,8 @@ export class GoogleChatBrowserChannel implements Channel {
     this.context.on('response', async (response) => {
       try {
         const url = response.url();
-        if (!url.includes('/webchannel/events') || !url.includes('VER=8')) return;
+        if (!url.includes('/webchannel/events') || !url.includes('VER=8'))
+          return;
         const body = await response.text().catch(() => '');
         if (!body) return;
         const chunkEvents = parseBrowserChannelBody(body);
@@ -599,7 +628,10 @@ export class GoogleChatBrowserChannel implements Channel {
           }
         }
       } catch (err) {
-        logger.debug({ err }, 'Google Chat Browser: WebChannel intercept error');
+        logger.debug(
+          { err },
+          'Google Chat Browser: WebChannel intercept error',
+        );
       }
     });
 
@@ -614,9 +646,14 @@ export class GoogleChatBrowserChannel implements Channel {
     this.context.on('response', async (response) => {
       try {
         const url = response.url();
-        const isSend = url.includes('/api/create_message') || url.includes('/api/create_topic');
+        const isSend =
+          url.includes('/api/create_message') ||
+          url.includes('/api/create_topic');
         if (!isSend) return;
-        logger.info({ url: url.replace(/[?&].*/, '') }, 'Google Chat Browser: send response intercepted');
+        logger.info(
+          { url: url.replace(/[?&].*/, '') },
+          'Google Chat Browser: send response intercepted',
+        );
         const raw = await response.text().catch(() => '');
         if (!raw) return;
         const cleaned = raw.replace(/^\)\]\}'\s*\n?/, '');
@@ -643,8 +680,9 @@ export class GoogleChatBrowserChannel implements Channel {
         const spaceRef: any = msg[0]?.[0]?.[3]?.[2];
         let spaceId = '';
         if (Array.isArray(spaceRef)) {
-          if (Array.isArray(spaceRef[0])) spaceId = spaceRef[0][0] ?? '';        // space: [["ID"]]
-          else if (Array.isArray(spaceRef[2])) spaceId = spaceRef[2][0] ?? '';   // DM: [null,null,["ID"]]
+          if (Array.isArray(spaceRef[0]))
+            spaceId = spaceRef[0][0] ?? ''; // space: [["ID"]]
+          else if (Array.isArray(spaceRef[2])) spaceId = spaceRef[2][0] ?? ''; // DM: [null,null,["ID"]]
         }
 
         if (!msgId || !spaceId || !threadAlphaId) return;
@@ -654,10 +692,7 @@ export class GoogleChatBrowserChannel implements Channel {
         const threadJid = makeThreadJid(parentJid, threadAlphaId);
         const timestamp = new Date(Number(BigInt(msgId) / 1000n)).toISOString();
 
-        // Ensure chat row exists (FK required by messages table)
-        storeChatMetadata(threadJid, timestamp, undefined, 'google_chat_browser');
-
-        storeMessageDirect({
+        this.opts.onBotMessage({
           id: msgId,
           chat_jid: threadJid,
           sender: senderUserId,
@@ -671,16 +706,24 @@ export class GoogleChatBrowserChannel implements Channel {
         this.webChannelDeliveredIds.add(msgId);
         this.sentMsgIds.add(msgId);
         if (this.webChannelDeliveredIds.size > 500) {
-          this.webChannelDeliveredIds.delete(this.webChannelDeliveredIds.values().next().value!);
+          this.webChannelDeliveredIds.delete(
+            this.webChannelDeliveredIds.values().next().value!,
+          );
         }
         // Advance cursor so the poll loop doesn't keep re-detecting this message
         const prevCursor = this.lastSeenMsgIds.get(parentJid) ?? '';
         if (!prevCursor || BigInt(msgId) > BigInt(prevCursor)) {
           this.lastSeenMsgIds.set(parentJid, msgId);
         }
-        logger.info({ threadJid, msgId, event: eventName }, 'Google Chat Browser: outbound message seeded to DB');
+        logger.info(
+          { threadJid, msgId, event: eventName },
+          'Google Chat Browser: outbound message seeded to DB',
+        );
       } catch (err) {
-        logger.warn({ err }, 'Google Chat Browser: send response intercept error');
+        logger.warn(
+          { err },
+          'Google Chat Browser: send response intercept error',
+        );
       }
     });
 
@@ -695,12 +738,20 @@ export class GoogleChatBrowserChannel implements Channel {
     try {
       const known = getKnownSenderNames();
       for (const [userId, name] of known) this.userNameCache.set(userId, name);
-      logger.info({ count: known.size }, 'Google Chat Browser: loaded sender names from DB');
-    } catch { /* non-fatal */ }
+      logger.info(
+        { count: known.size },
+        'Google Chat Browser: loaded sender names from DB',
+      );
+    } catch {
+      /* non-fatal */
+    }
 
     // Open home page — detects account index, captures XSRF, checks auth
     this.homePage = await this.context.newPage();
-    await this.homePage.goto(HOME_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await this.homePage.goto(HOME_URL, {
+      waitUntil: 'domcontentloaded',
+      timeout: 60000,
+    });
     await this.homePage.waitForTimeout(PAGE_LOAD_WAIT_MS);
 
     if (await this.isAuthExpired(this.homePage)) {
@@ -712,11 +763,17 @@ export class GoogleChatBrowserChannel implements Channel {
     const finalUrl = this.homePage.url();
     const idxMatch = finalUrl.match(/\/u\/(\d+)\//);
     this.accountIndex = idxMatch?.[1] ?? '0';
-    logger.info({ accountIndex: this.accountIndex }, 'Google Chat Browser: account index detected');
+    logger.info(
+      { accountIndex: this.accountIndex },
+      'Google Chat Browser: account index detected',
+    );
 
     // Detect bot display name
     this.botDisplayName = await this.detectBotName();
-    logger.info({ botDisplayName: this.botDisplayName }, 'Google Chat Browser: bot name detected');
+    logger.info(
+      { botDisplayName: this.botDisplayName },
+      'Google Chat Browser: bot name detected',
+    );
 
     // Detect space format and catch up for each registered group
     const groups = this.opts.registeredGroups();
@@ -743,7 +800,10 @@ export class GoogleChatBrowserChannel implements Channel {
 
   async disconnect(): Promise<void> {
     this._connected = false;
-    if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
     await this.homePage?.close().catch(() => {});
     this.homePage = null;
     for (const page of this.pages.values()) await page.close().catch(() => {});
@@ -753,9 +813,13 @@ export class GoogleChatBrowserChannel implements Channel {
     logger.info('Google Chat Browser: disconnected');
   }
 
-  isConnected(): boolean { return this._connected; }
+  isConnected(): boolean {
+    return this._connected;
+  }
 
-  ownsJid(jid: string): boolean { return jid.startsWith('gchat:'); }
+  ownsJid(jid: string): boolean {
+    return jid.startsWith('gchat:');
+  }
 
   async addSpace(jid: string): Promise<void> {
     if (!this._connected || !this.context) return;
@@ -765,7 +829,10 @@ export class GoogleChatBrowserChannel implements Channel {
       this.spaceFormats.set(spaceId, fmt);
     }
     await this.catchUpSpace(jid).catch((err) =>
-      logger.warn({ err, jid }, 'Google Chat Browser: addSpace catch-up failed'),
+      logger.warn(
+        { err, jid },
+        'Google Chat Browser: addSpace catch-up failed',
+      ),
     );
   }
 
@@ -786,7 +853,15 @@ export class GoogleChatBrowserChannel implements Channel {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const KbEvent = (globalThis as any).KeyboardEvent;
           const dispatch = (type: string) =>
-            el.dispatchEvent(new KbEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true, cancelable: true }));
+            el.dispatchEvent(
+              new KbEvent(type, {
+                key: 'Enter',
+                code: 'Enter',
+                keyCode: 13,
+                bubbles: true,
+                cancelable: true,
+              }),
+            );
           dispatch('keydown');
           dispatch('keypress');
           dispatch('keyup');
@@ -796,13 +871,20 @@ export class GoogleChatBrowserChannel implements Channel {
       );
       if (result === 'no-input') throw new Error('Message input not found');
       await page.waitForTimeout(1500);
-      logger.info({ jid, length: text.length }, 'Google Chat Browser: message sent');
+      logger.info(
+        { jid, length: text.length },
+        'Google Chat Browser: message sent',
+      );
     } finally {
       this.sending = false;
     }
   }
 
-  async sendThreadReply(jid: string, text: string, threadRootId: string): Promise<void> {
+  async sendThreadReply(
+    jid: string,
+    text: string,
+    threadRootId: string,
+  ): Promise<void> {
     this.sending = true;
     const spaceId = jid.replace('gchat:', '');
     const url = this.threadUrl(spaceId, threadRootId);
@@ -817,21 +899,43 @@ export class GoogleChatBrowserChannel implements Channel {
       // Wait for the editable reply div inside the thread pane — generous timeout
       // because thread content loads asynchronously after the SPA navigation
       const inputSel = SELECTORS.threadInput(threadRootId);
-      await page.waitForSelector(inputSel, { timeout: 15000, state: 'visible' });
+      await page.waitForSelector(inputSel, {
+        timeout: 15000,
+        state: 'visible',
+      });
 
       await page.click(inputSel);
       await page.keyboard.type(text, { delay: 20 });
       await page.keyboard.press('Enter');
       await page.waitForTimeout(1500);
-      logger.info({ jid, threadRootId, length: text.length }, 'Google Chat Browser: thread reply sent');
+      logger.info(
+        { jid, threadRootId, length: text.length },
+        'Google Chat Browser: thread reply sent',
+      );
 
       // Navigate back to space root so the page is ready for future sends
-      await page.goto(this.roomUrl(jid), { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+      await page
+        .goto(this.roomUrl(jid), {
+          waitUntil: 'domcontentloaded',
+          timeout: 30000,
+        })
+        .catch(() => {});
     } catch (err) {
-      logger.error({ err, jid, threadRootId }, 'Google Chat Browser: thread reply failed, falling back');
-      await page.goto(this.roomUrl(jid), { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+      logger.error(
+        { err, jid, threadRootId },
+        'Google Chat Browser: thread reply failed, falling back',
+      );
+      await page
+        .goto(this.roomUrl(jid), {
+          waitUntil: 'domcontentloaded',
+          timeout: 30000,
+        })
+        .catch(() => {});
       await this.sendMessage(jid, text).catch((e) =>
-        logger.error({ e, jid }, 'Google Chat Browser: fallback sendMessage also failed'),
+        logger.error(
+          { e, jid },
+          'Google Chat Browser: fallback sendMessage also failed',
+        ),
       );
     } finally {
       this.sending = false;
@@ -844,13 +948,17 @@ export class GoogleChatBrowserChannel implements Channel {
    * Make an authenticated POST to the Google Chat API.
    * Uses context.request which shares cookies with the browser context.
    */
-  private async apiPost(endpoint: string, body: any[], spaceId?: string): Promise<any> {
+  private async apiPost(
+    endpoint: string,
+    body: any[],
+    spaceId?: string,
+  ): Promise<any> {
     if (!this.context) throw new Error('Not connected');
     const url = `${CHAT_BASE}/u/${this.accountIndex}/api/${endpoint}`;
     const headers: Record<string, string> = {
       'content-type': 'application/json',
-      'origin': CHAT_BASE,
-      'referer': `${CHAT_BASE}/`,
+      origin: CHAT_BASE,
+      referer: `${CHAT_BASE}/`,
     };
     if (this.xsrfToken) headers['x-framework-xsrf-token'] = this.xsrfToken;
     if (spaceId) headers['x-goog-chat-space-id'] = spaceId;
@@ -866,7 +974,10 @@ export class GoogleChatBrowserChannel implements Channel {
     try {
       return JSON.parse(cleaned);
     } catch {
-      logger.debug({ endpoint, text: text.slice(0, 200) }, 'Google Chat Browser: failed to parse API response');
+      logger.debug(
+        { endpoint, text: text.slice(0, 200) },
+        'Google Chat Browser: failed to parse API response',
+      );
       return null;
     }
   }
@@ -881,15 +992,23 @@ export class GoogleChatBrowserChannel implements Channel {
     const pastMicros = nowMicros() - DEFAULT_LOOKBACK_MICROS;
     try {
       const spaceRef = buildSpaceRef(spaceId, false);
-      const body = buildListTopicsBody(spaceRef, pastMicros);
+      const body = buildListTopicsBody(spaceRef, pastMicros, nowMicros());
       const data = await this.apiPost('list_topics', body, spaceId);
       if (Array.isArray(data?.[0]) && data[0][0] === 'dfe.t.lt') {
-        logger.debug({ spaceId, fmt: 'space' }, 'Google Chat Browser: space format confirmed');
+        logger.debug(
+          { spaceId, fmt: 'space' },
+          'Google Chat Browser: space format confirmed',
+        );
         return 'space';
       }
-    } catch { /* fall through */ }
+    } catch {
+      /* fall through */
+    }
 
-    logger.debug({ spaceId, fmt: 'dm' }, 'Google Chat Browser: using dm format');
+    logger.debug(
+      { spaceId, fmt: 'dm' },
+      'Google Chat Browser: using dm format',
+    );
     return 'dm';
   }
 
@@ -898,10 +1017,16 @@ export class GoogleChatBrowserChannel implements Channel {
   private async refreshXsrfToken(): Promise<void> {
     if (!this.homePage || !this.context) return;
     try {
-      await this.homePage.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
+      await this.homePage.reload({
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+      });
       await this.homePage.waitForTimeout(3000);
       this.lastTokenRefresh = Date.now();
-      logger.info({ accountIndex: this.accountIndex }, 'Google Chat Browser: XSRF token refreshed');
+      logger.info(
+        { accountIndex: this.accountIndex },
+        'Google Chat Browser: XSRF token refreshed',
+      );
     } catch (err) {
       logger.warn({ err }, 'Google Chat Browser: XSRF token refresh failed');
     }
@@ -911,7 +1036,10 @@ export class GoogleChatBrowserChannel implements Channel {
     if (this.sending) return;
 
     // Refresh XSRF token periodically
-    if (Date.now() - this.lastTokenRefresh > GoogleChatBrowserChannel.TOKEN_REFRESH_INTERVAL_MS) {
+    if (
+      Date.now() - this.lastTokenRefresh >
+      GoogleChatBrowserChannel.TOKEN_REFRESH_INTERVAL_MS
+    ) {
       await this.refreshXsrfToken();
     }
 
@@ -929,57 +1057,29 @@ export class GoogleChatBrowserChannel implements Channel {
     const isDm = (this.spaceFormats.get(spaceId) ?? 'space') === 'dm';
     const spaceRef = buildSpaceRef(spaceId, isDm);
 
-    // Use the last seen message ID as the since cursor
     const lastSeenId = this.lastSeenMsgIds.get(jid) ?? '';
-    const since = lastSeenId ? parseInt(lastSeenId, 10) : nowMicros() - DEFAULT_LOOKBACK_MICROS;
 
-    const data = await this.apiPost('list_topics', buildListTopicsBody(spaceRef, since), spaceId);
+    // Fetch the most recent page of topics (cursor = now).
+    // list_topics returns the 20 most recently active topics with last-activity ≤ cursor.
+    // Setting cursor = now gives us the current most-recent page — any message with
+    // msgId > lastSeenId is new.
+    const now = nowMicros();
+    const data = await this.apiPost(
+      'list_topics',
+      buildListTopicsBody(spaceRef, now, now),
+      spaceId,
+    );
     if (!data) return;
 
-    const { msgs, maxRawMsgId, apiNextCursor, userNames } = parseListTopicsMessages(data);
+    const { msgs, maxRawMsgId, userNames } = parseListTopicsMessages(data);
     for (const [uid, name] of userNames) this.userNameCache.set(uid, name);
-    logger.info({ jid, count: msgs.length, maxRawMsgId, apiNextCursor, isDm, since: since.toString(), lastSeenId }, 'Google Chat Browser: list_topics returned messages');
 
-    // Step 2: detect new messages not in data[0][1].
-    // New threads created after `since` only appear in participant delta records (data[0][6][1]).
-    // For each participant entry with a last-message ID > cursor, fetch the actual content.
-    const deltaNewIds = extractDeltaNewMsgIds(data, lastSeenId);
-    let secondaryMsgs: ParsedMsg[] = [];
-    let secondaryApiNextCursor = '';
-    let secondaryMaxRawMsgId = '';
-
-    if (deltaNewIds.length > 0) {
-      const minNewId = deltaNewIds.reduce((a, b) => BigInt(a) < BigInt(b) ? a : b);
-      const secondarySince = (BigInt(minNewId) - 1n).toString();
-      logger.info({ jid, deltaNewIds, secondarySince }, 'Google Chat Browser: new participant delta IDs detected — secondary fetch');
-      const secondaryData = await this.apiPost(
-        'list_topics',
-        buildListTopicsBody(spaceRef, parseInt(secondarySince, 10)),
-        spaceId,
-      );
-      if (secondaryData) {
-        const parsed = parseListTopicsMessages(secondaryData);
-        secondaryMsgs = parsed.msgs;
-        secondaryApiNextCursor = parsed.apiNextCursor;
-        secondaryMaxRawMsgId = parsed.maxRawMsgId;
-        for (const [uid, name] of parsed.userNames) this.userNameCache.set(uid, name);
-        logger.info(
-          { jid, secondaryCount: secondaryMsgs.length, secondaryMaxRawMsgId },
-          'Google Chat Browser: secondary fetch complete',
-        );
-      }
-    }
-
-    // Deliver all messages (primary + secondary), deduplicating by msgId
-    const deliveredIds = new Set<string>();
-    for (const msg of [...msgs, ...secondaryMsgs]) {
-      if (deliveredIds.has(msg.msgId)) continue;
-      deliveredIds.add(msg.msgId);
-
-      // Skip messages older than or equal to last seen, or already delivered via WebChannel
-      if (lastSeenId && BigInt(msg.msgId) <= BigInt(lastSeenId)) continue;
+    let newCount = 0;
+    for (const msg of msgs) {
       if (this.webChannelDeliveredIds.has(msg.msgId)) continue;
+      if (lastSeenId && BigInt(msg.msgId) <= BigInt(lastSeenId)) continue;
 
+      newCount++;
       const threadJid = makeThreadJid(jid, msg.threadAlphaId);
       const isBotMsg =
         this.sentMsgIds.has(msg.msgId) ||
@@ -988,16 +1088,30 @@ export class GoogleChatBrowserChannel implements Channel {
 
       if (this.sentMsgIds.has(msg.msgId)) this.sentMsgIds.delete(msg.msgId);
 
-      // Back-fill thread history on first contact with this thread
+      // Back-fill thread history on first contact
       if (!isBotMsg && !this.threadHistoryFetched.has(threadJid)) {
         this.threadHistoryFetched.add(threadJid);
-        await this.fetchAndStoreThreadHistory(jid, spaceId, isDm, msg.threadAlphaId).catch(
-          (err) => logger.warn({ err, threadJid }, 'Google Chat Browser: thread history fetch failed'),
+        await this.fetchAndStoreThreadHistory(
+          jid,
+          spaceId,
+          isDm,
+          msg.threadAlphaId,
+        ).catch((err) =>
+          logger.warn(
+            { err, threadJid },
+            'Google Chat Browser: thread history fetch failed',
+          ),
         );
       }
 
       logger.info(
-        { jid: threadJid, msgId: msg.msgId, sender: msg.senderName, isBotMsg, text: msg.text.slice(0, 120) },
+        {
+          jid: threadJid,
+          msgId: msg.msgId,
+          sender: msg.senderName,
+          isBotMsg,
+          text: msg.text.slice(0, 120),
+        },
         'Google Chat Browser: new message',
       );
 
@@ -1015,16 +1129,19 @@ export class GoogleChatBrowserChannel implements Channel {
       });
     }
 
-    // Advance cursor ONLY based on maxRawMsgId from parsed header[1] content (primary + secondary).
-    // We intentionally do NOT use apiNextCursor or deltaNewIds here — those can overshoot past
-    // messages that haven't yet propagated into list_topics header[1]. Once the messages appear
-    // in header[1] (typically within 1-2 poll cycles), maxRawMsgId will include them and the
-    // cursor will advance naturally after delivery.
-    const nextCursorCandidates = [maxRawMsgId, secondaryMaxRawMsgId].filter(Boolean);
-    const nextCursor = nextCursorCandidates.reduce((max, id) =>
-      !max || BigInt(id) > BigInt(max) ? id : max, '');
-    if (nextCursor && (!lastSeenId || BigInt(nextCursor) > BigInt(lastSeenId))) {
-      this.lastSeenMsgIds.set(jid, nextCursor);
+    if (newCount > 0) {
+      logger.info(
+        { jid, newCount, maxRawMsgId },
+        'Google Chat Browser: poll delivered new messages',
+      );
+    }
+
+    // Advance cursor to the newest message seen in this page
+    if (
+      maxRawMsgId &&
+      (!lastSeenId || BigInt(maxRawMsgId) > BigInt(lastSeenId))
+    ) {
+      this.lastSeenMsgIds.set(jid, maxRawMsgId);
     }
   }
 
@@ -1045,7 +1162,9 @@ export class GoogleChatBrowserChannel implements Channel {
     // Mark delivered immediately so the poll won't double-deliver
     this.webChannelDeliveredIds.add(msg.msgId);
     if (this.webChannelDeliveredIds.size > 500) {
-      this.webChannelDeliveredIds.delete(this.webChannelDeliveredIds.values().next().value!);
+      this.webChannelDeliveredIds.delete(
+        this.webChannelDeliveredIds.values().next().value!,
+      );
     }
     // Also advance cursor so poll skips this message
     this.lastSeenMsgIds.set(jid, msg.msgId);
@@ -1067,15 +1186,34 @@ export class GoogleChatBrowserChannel implements Channel {
     // the message propagates into list_topics (real-time events omit display names).
     if (!isBotMsg && !this.threadHistoryFetched.has(threadJid)) {
       this.threadHistoryFetched.add(threadJid);
-      await this.fetchAndStoreThreadHistory(jid, msg.spaceId, msg.isDm, msg.threadAlphaId).catch(
-        (err) => logger.warn({ err, threadJid }, 'Google Chat Browser: thread history fetch failed'),
+      await this.fetchAndStoreThreadHistory(
+        jid,
+        msg.spaceId,
+        msg.isDm,
+        msg.threadAlphaId,
+      ).catch((err) =>
+        logger.warn(
+          { err, threadJid },
+          'Google Chat Browser: thread history fetch failed',
+        ),
       );
       // Retry after propagation delay to fill in sender names
-      setTimeout(() => {
-        this.fetchAndStoreThreadHistory(jid, msg.spaceId, msg.isDm, msg.threadAlphaId).catch(
-          (err) => logger.debug({ err, threadJid }, 'Google Chat Browser: thread history retry failed'),
-        );
-      }, 5 * 60 * 1000);
+      setTimeout(
+        () => {
+          this.fetchAndStoreThreadHistory(
+            jid,
+            msg.spaceId,
+            msg.isDm,
+            msg.threadAlphaId,
+          ).catch((err) =>
+            logger.debug(
+              { err, threadJid },
+              'Google Chat Browser: thread history retry failed',
+            ),
+          );
+        },
+        5 * 60 * 1000,
+      );
     }
 
     // Resolve display name from cache if not present in real-time event
@@ -1084,7 +1222,14 @@ export class GoogleChatBrowserChannel implements Channel {
     }
 
     logger.info(
-      { jid: threadJid, msgId: msg.msgId, sender: msg.senderUserId, senderName: msg.senderName, isBotMsg, text: msg.text.slice(0, 120) },
+      {
+        jid: threadJid,
+        msgId: msg.msgId,
+        sender: msg.senderUserId,
+        senderName: msg.senderName,
+        isBotMsg,
+        text: msg.text.slice(0, 120),
+      },
       'Google Chat Browser: real-time message via WebChannel',
     );
 
@@ -1114,18 +1259,27 @@ export class GoogleChatBrowserChannel implements Channel {
   ): Promise<void> {
     const threadJid = makeThreadJid(parentJid, threadAlphaId);
     const spaceRef = buildSpaceRef(spaceId, isDm);
-    const since = 0; // fetch entire thread history
+    const sessionNow = nowMicros();
 
     const data = await this.apiPost(
       'list_topics',
-      buildThreadListTopicsBody(spaceRef, spaceId, isDm, threadAlphaId, since),
+      buildThreadListTopicsBody(
+        spaceRef,
+        spaceId,
+        isDm,
+        threadAlphaId,
+        sessionNow,
+      ),
       spaceId,
     );
     if (!data) return;
 
     const { msgs, userNames } = parseListTopicsMessages(data);
     for (const [uid, name] of userNames) this.userNameCache.set(uid, name);
-    logger.info({ threadJid, historyCount: msgs.length }, 'Google Chat Browser: fetched thread history');
+    logger.info(
+      { threadJid, historyCount: msgs.length },
+      'Google Chat Browser: fetched thread history',
+    );
 
     for (const msg of msgs) {
       const isBotMsg =
@@ -1151,55 +1305,112 @@ export class GoogleChatBrowserChannel implements Channel {
    * Catch up on all messages missed while offline for a registered space JID.
    * Reads the last stored timestamp from the DB and fetches everything since then.
    */
+  /**
+   * Catch up on messages missed while offline by paging backward through list_topics.
+   *
+   * list_topics(cursor=T) returns the 20 most recently active topics with last-activity ≤ T.
+   * To page forward in time (oldest to newest) we start from now and walk backward:
+   *   page 1: cursor = now      → topics [T-20 .. now]
+   *   page 2: cursor = min-1    → topics [T-40 .. T-20]
+   *   ... stop when oldest topic on a page is older than our DB cursor
+   *
+   * Messages are delivered in reverse order (newest first) but stored via onMessage
+   * which uses INSERT OR REPLACE so ordering doesn't matter for persistence.
+   */
   private async catchUpSpace(jid: string): Promise<void> {
     const spaceId = jid.replace('gchat:', '');
     const isDm = (this.spaceFormats.get(spaceId) ?? 'space') === 'dm';
     const spaceRef = buildSpaceRef(spaceId, isDm);
 
-    // Find the last message we stored for this space (any thread under it)
+    // Target: fetch messages newer than the last stored timestamp.
+    // If DB is empty (fresh wipe), set target = 0 to page all the way back to the beginning.
     const lastIso = getLastMessageTimestamp(jid);
-    const since = lastIso
-      ? isoToMicros(lastIso)
-      : nowMicros() - DEFAULT_LOOKBACK_MICROS;
+    const targetMicros = lastIso ? BigInt(isoToMicros(lastIso)) : 0n;
 
-    logger.info({ jid, since: lastIso ?? 'default lookback' }, 'Google Chat Browser: catching up');
+    logger.info(
+      { jid, target: lastIso ?? 'full history' },
+      'Google Chat Browser: catching up',
+    );
 
-    const data = await this.apiPost('list_topics', buildListTopicsBody(spaceRef, since), spaceId);
-    if (!data) return;
+    const sessionNow = nowMicros();
+    let pageCursor = sessionNow;
+    let totalDelivered = 0;
+    let maxSeenMsgId = '';
+    const MAX_PAGES = 50; // safety cap (50 × 20 = 1000 topics)
 
-    const { msgs, maxRawMsgId, apiNextCursor, userNames } = parseListTopicsMessages(data);
-    for (const [uid, name] of userNames) this.userNameCache.set(uid, name);
-    logger.info({ jid, count: msgs.length, maxRawMsgId, apiNextCursor }, 'Google Chat Browser: catch-up messages found');
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const data = await this.apiPost(
+        'list_topics',
+        buildListTopicsBody(spaceRef, pageCursor, sessionNow),
+        spaceId,
+      );
+      if (!data) break;
 
-    for (const msg of msgs) {
-      const threadJid = makeThreadJid(jid, msg.threadAlphaId);
-      const isBotMsg =
-        (this.botUserId !== '' && msg.senderUserId === this.botUserId) ||
-        (this.botDisplayName !== '' && msg.senderName === this.botDisplayName);
+      const { msgs, maxRawMsgId, minTopicSortId, userNames } =
+        parseListTopicsMessages(data);
+      for (const [uid, name] of userNames) this.userNameCache.set(uid, name);
 
-      try {
-        this.opts.onMessage(threadJid, {
-          id: msg.msgId,
-          chat_jid: threadJid,
-          sender: msg.senderUserId,
-          sender_name: msg.senderName,
-          content: msg.text,
-          timestamp: msg.timestamp,
-          is_from_me: isBotMsg,
-          is_bot_message: isBotMsg,
-          alpha_id: msg.msgAlphaId || undefined,
-          is_thread_root: msg.isThreadRoot,
-        });
-      } catch (err) {
-        logger.warn({ err, msgId: msg.msgId, threadJid }, 'Google Chat Browser: onMessage error during catch-up (continuing)');
+      if (msgs.length === 0) break;
+
+      // Track the global max message ID for cursor update
+      if (
+        maxRawMsgId &&
+        (!maxSeenMsgId || BigInt(maxRawMsgId) > BigInt(maxSeenMsgId))
+      ) {
+        maxSeenMsgId = maxRawMsgId;
       }
+
+      // Deliver messages newer than our target
+      for (const msg of msgs) {
+        if (BigInt(msg.msgId) <= targetMicros) continue;
+
+        const threadJid = makeThreadJid(jid, msg.threadAlphaId);
+        const isBotMsg =
+          (this.botUserId !== '' && msg.senderUserId === this.botUserId) ||
+          (this.botDisplayName !== '' &&
+            msg.senderName === this.botDisplayName);
+
+        try {
+          this.opts.onMessage(threadJid, {
+            id: msg.msgId,
+            chat_jid: threadJid,
+            sender: msg.senderUserId,
+            sender_name: msg.senderName,
+            content: msg.text,
+            timestamp: msg.timestamp,
+            is_from_me: isBotMsg,
+            is_bot_message: isBotMsg,
+            alpha_id: msg.msgAlphaId || undefined,
+            is_thread_root: msg.isThreadRoot,
+          });
+          totalDelivered++;
+        } catch (err) {
+          logger.warn(
+            { err, msgId: msg.msgId, threadJid },
+            'Google Chat Browser: onMessage error during catch-up (continuing)',
+          );
+        }
+      }
+
+      // Stop if the oldest topic on this page has last-activity ≤ target — nothing older is needed
+      if (!minTopicSortId || BigInt(minTopicSortId) <= targetMicros) break;
+
+      // Page backward: set cursor to just before the oldest topic's last-activity time
+      pageCursor = Number(BigInt(minTopicSortId) - 1n);
     }
 
-    // Advance cursor: use only maxRawMsgId (apiNextCursor can overshoot past current messages)
-    const nextCursor = maxRawMsgId;
+    logger.info(
+      { jid, totalDelivered, maxSeenMsgId },
+      'Google Chat Browser: catch-up complete',
+    );
+
+    // Set cursor to the newest message we've seen so poll knows where to start
     const curBefore = this.lastSeenMsgIds.get(jid) ?? '';
-    if (nextCursor && (!curBefore || BigInt(nextCursor) > BigInt(curBefore))) {
-      this.lastSeenMsgIds.set(jid, nextCursor);
+    if (
+      maxSeenMsgId &&
+      (!curBefore || BigInt(maxSeenMsgId) > BigInt(curBefore))
+    ) {
+      this.lastSeenMsgIds.set(jid, maxSeenMsgId);
     }
   }
 
@@ -1209,9 +1420,18 @@ export class GoogleChatBrowserChannel implements Channel {
     if (page.url().includes('accounts.google.com')) return true;
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const bodyText = await page.$eval('body', (el: any) => el.innerText ?? '');
-      if (bodyText.includes('Choose an account') || bodyText.includes('Signed out')) return true;
-    } catch { /* ignore */ }
+      const bodyText = await page.$eval(
+        'body',
+        (el: any) => el.innerText ?? '',
+      );
+      if (
+        bodyText.includes('Choose an account') ||
+        bodyText.includes('Signed out')
+      )
+        return true;
+    } catch {
+      /* ignore */
+    }
     return false;
   }
 
@@ -1219,10 +1439,15 @@ export class GoogleChatBrowserChannel implements Channel {
     if (!this.homePage) return '';
     try {
       const label = await this.homePage
-        .$eval('[aria-label^="Google Account:"]', (el) => el.getAttribute('aria-label') ?? '')
+        .$eval(
+          '[aria-label^="Google Account:"]',
+          (el) => el.getAttribute('aria-label') ?? '',
+        )
         .catch(() => '');
       return label.replace('Google Account:', '').trim().split('\n')[0].trim();
-    } catch { return ''; }
+    } catch {
+      return '';
+    }
   }
 
   // ── DOM helpers — used by Phase-1 DOM-based sending only ─────────────────
@@ -1247,7 +1472,10 @@ export class GoogleChatBrowserChannel implements Channel {
 
   private async initPageForSending(jid: string): Promise<Page> {
     const page = await this.context!.newPage();
-    await page.goto(this.roomUrl(jid), { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.goto(this.roomUrl(jid), {
+      waitUntil: 'domcontentloaded',
+      timeout: 60000,
+    });
     await page.waitForTimeout(PAGE_LOAD_WAIT_MS);
     if (await this.isAuthExpired(page)) {
       await page.close();
@@ -1256,13 +1484,24 @@ export class GoogleChatBrowserChannel implements Channel {
     try {
       await page.waitForSelector(SELECTORS.messageInput, { timeout: 8000 });
     } catch {
-      logger.warn({ jid }, 'Google Chat Browser: message input not found on send page');
+      logger.warn(
+        { jid },
+        'Google Chat Browser: message input not found on send page',
+      );
     }
     // Try to get space name
-    const spaceName = await page.$eval(SELECTORS.spaceName, (el) => el.textContent?.trim() ?? '').catch(() => '');
+    const spaceName = await page
+      .$eval(SELECTORS.spaceName, (el) => el.textContent?.trim() ?? '')
+      .catch(() => '');
     if (spaceName) {
       updateChatName(jid, spaceName);
-      this.opts.onChatMetadata(jid, new Date().toISOString(), spaceName, 'google_chat_browser', true);
+      this.opts.onChatMetadata(
+        jid,
+        new Date().toISOString(),
+        spaceName,
+        'google_chat_browser',
+        true,
+      );
     }
     this.pages.set(jid, page);
     logger.info({ jid, spaceName }, 'Google Chat Browser: send page opened');
@@ -1284,13 +1523,16 @@ export class GoogleChatBrowserChannel implements Channel {
 
 registerChannel('google_chat_browser', (opts: ChannelOpts) => {
   if (!fs.existsSync(USER_DATA_DIR) && !fs.existsSync(AUTH_PATH)) {
-    logger.debug({ USER_DATA_DIR }, 'Google Chat Browser: no auth found, skipping channel');
+    logger.debug(
+      { USER_DATA_DIR },
+      'Google Chat Browser: no auth found, skipping channel',
+    );
     return null;
   }
   if (!fs.existsSync(USER_DATA_DIR) && fs.existsSync(AUTH_PATH)) {
     logger.warn(
       'Google Chat Browser: legacy auth.json found but user-data dir is missing. ' +
-      'Re-run auth capture: npx tsx setup/index.ts --step google-chat-browser-auth',
+        'Re-run auth capture: npx tsx setup/index.ts --step google-chat-browser-auth',
     );
     return null;
   }

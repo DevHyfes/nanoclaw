@@ -100,6 +100,7 @@ const registeredName = vi.mocked(registerChannel).mock.calls[0]?.[0] ?? null;
 const makeOpts = (groups: Record<string, any> = {}) => ({
   onMessage: vi.fn(),
   onChatMetadata: vi.fn(),
+  onBotMessage: vi.fn(),
   registeredGroups: vi.fn().mockReturnValue(groups),
 });
 
@@ -232,6 +233,7 @@ describe('GoogleChatBrowserChannel', () => {
       const opts = {
         onMessage,
         onChatMetadata: vi.fn(),
+        onBotMessage: vi.fn(),
         registeredGroups: vi.fn().mockReturnValue(groups),
       };
 
@@ -267,6 +269,7 @@ describe('GoogleChatBrowserChannel', () => {
       const opts = {
         onMessage,
         onChatMetadata: vi.fn(),
+        onBotMessage: vi.fn(),
         registeredGroups: vi.fn().mockReturnValue({}),
       };
       const ch = new GoogleChatBrowserChannel(opts);
@@ -330,6 +333,7 @@ describe('GoogleChatBrowserChannel', () => {
       const opts = {
         onMessage,
         onChatMetadata: vi.fn(),
+        onBotMessage: vi.fn(),
         registeredGroups: vi.fn().mockReturnValue(groups),
       };
 
@@ -377,6 +381,7 @@ describe('GoogleChatBrowserChannel', () => {
       const opts = {
         onMessage,
         onChatMetadata: vi.fn(),
+        onBotMessage: vi.fn(),
         registeredGroups: vi.fn().mockReturnValue(groups),
       };
 
@@ -410,6 +415,7 @@ describe('GoogleChatBrowserChannel', () => {
       const opts = {
         onMessage,
         onChatMetadata: vi.fn(),
+        onBotMessage: vi.fn(),
         registeredGroups: vi.fn().mockReturnValue({}), // no registered groups
       };
 
@@ -433,6 +439,7 @@ describe('GoogleChatBrowserChannel', () => {
       const opts = {
         onMessage,
         onChatMetadata: vi.fn(),
+        onBotMessage: vi.fn(),
         registeredGroups: vi.fn().mockReturnValue(groups),
       };
 

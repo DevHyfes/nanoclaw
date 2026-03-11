@@ -212,11 +212,11 @@ launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 
 ## Phase 9: Verify
 
-1. In the registered Google Chat space, send: `@Chiron hello`
+1. In the registered Google Chat space, send: `@{ASSISTANT_NAME} hello`
 2. Expect a response within ~15 seconds (5s poll cycle + processing)
 3. Check logs: `tail -f logs/nanoclaw.log`
    - Look for: `Google Chat Browser: page initialised` on startup
-   - Look for: `Google Chat Browser: message sent` when Chiron replies
+   - Look for: `Google Chat Browser: message sent` when the assistant replies
 
 ---
 

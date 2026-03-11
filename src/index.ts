@@ -15,6 +15,7 @@ import './channels/index.js';
 import {
   getChannelFactory,
   getRegisteredChannelNames,
+  type OnBotMessage,
 } from './channels/registry.js';
 import {
   ContainerOutput,
@@ -42,6 +43,7 @@ import {
   setSession,
   storeChatMetadata,
   storeMessage,
+  storeMessageDirect,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
@@ -582,12 +584,7 @@ async function main(): Promise<void> {
         }
       }
       // Ensure chat row exists (required by foreign key on messages table)
-      storeChatMetadata(
-        chatJid,
-        msg.timestamp,
-        undefined,
-        'google_chat_browser',
-      );
+      storeChatMetadata(chatJid, msg.timestamp);
       storeMessage(msg);
 
       // Dynamically register thread JID in memory (not persisted to DB)
@@ -609,6 +606,10 @@ async function main(): Promise<void> {
       channel?: string,
       isGroup?: boolean,
     ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
+    onBotMessage: ((msg) => {
+      storeChatMetadata(msg.chat_jid, msg.timestamp);
+      storeMessageDirect(msg);
+    }) satisfies OnBotMessage,
     registeredGroups: () => registeredGroups,
   };
 

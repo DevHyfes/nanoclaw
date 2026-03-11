@@ -6,8 +6,6 @@ import { STORE_DIR } from '../config.js';
 import {
   getLastMessageTimestamp,
   getKnownSenderNames,
-  storeChatMetadata,
-  storeMessageDirect,
   updateChatName,
 } from '../db.js';
 import { logger } from '../logger.js';
@@ -529,11 +527,7 @@ function parseListTopicsMessages(raw: any): {
 
 // ─── Channel class ────────────────────────────────────────────────────────────
 
-export interface GoogleChatBrowserChannelOpts {
-  onMessage: OnInboundMessage;
-  onChatMetadata: OnChatMetadata;
-  registeredGroups: () => Record<string, RegisteredGroup>;
-}
+export interface GoogleChatBrowserChannelOpts extends ChannelOpts {}
 
 export class GoogleChatBrowserChannel implements Channel {
   name = 'google_chat_browser';
@@ -698,15 +692,7 @@ export class GoogleChatBrowserChannel implements Channel {
         const threadJid = makeThreadJid(parentJid, threadAlphaId);
         const timestamp = new Date(Number(BigInt(msgId) / 1000n)).toISOString();
 
-        // Ensure chat row exists (FK required by messages table)
-        storeChatMetadata(
-          threadJid,
-          timestamp,
-          undefined,
-          'google_chat_browser',
-        );
-
-        storeMessageDirect({
+        this.opts.onBotMessage({
           id: msgId,
           chat_jid: threadJid,
           sender: senderUserId,
