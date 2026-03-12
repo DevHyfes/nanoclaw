@@ -38,6 +38,7 @@ export interface ContainerInput {
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
+  parentJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
@@ -689,8 +690,9 @@ export function writeGroupsSnapshot(
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
-  // Main sees all groups; others see nothing (they can't activate groups)
-  const visibleGroups = isMain ? groups : [];
+  // All groups see all registered groups so agents can route cross-channel messages.
+  // Activation (register_group) is still gated by isMain in the MCP server.
+  const visibleGroups = groups;
 
   const groupsFile = path.join(groupIpcDir, 'available_groups.json');
   fs.writeFileSync(

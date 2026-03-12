@@ -17,6 +17,7 @@ const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 
 // Context from environment variables (set by the agent runner)
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
+const parentJid = process.env.NANOCLAW_PARENT_JID || chatJid;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
 
@@ -41,15 +42,25 @@ const server = new McpServer({
 
 server.tool(
   'send_message',
-  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times.",
+  `Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times.
+
+Current thread JID: ${chatJid}
+Parent channel JID: ${parentJid}
+
+By default, sends to your current thread. To post somewhere else, pass the destination jid:
+- Reply in current thread (default): omit jid
+- Post to parent channel (new top-level message): jid = "${parentJid}"
+- Post to another channel: use its JID from /workspace/ipc/available_groups.json
+- Post to a specific thread: use the full thread JID (e.g., "${parentJid}:thread:ALPHAID")`,
   {
     text: z.string().describe('The message text to send'),
+    jid: z.string().optional().describe(`Destination JID. Omit to reply in current thread ("${chatJid}"). Pass a space JID to post a new top-level message. Pass a thread JID to post in that thread.`),
     sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
   },
   async (args) => {
     const data: Record<string, string | undefined> = {
       type: 'message',
-      chatJid,
+      chatJid: args.jid || chatJid,
       text: args.text,
       sender: args.sender || undefined,
       groupFolder,

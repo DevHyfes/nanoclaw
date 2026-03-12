@@ -1,6 +1,7 @@
 import { chromium, BrowserContext, Page } from 'playwright';
 import fs from 'fs';
 import path from 'path';
+import { randomBytes } from 'crypto';
 
 import { STORE_DIR } from '../config.js';
 import {
@@ -71,6 +72,73 @@ function buildSpaceRef(spaceId: string, isDm: boolean): any[] {
  */
 function buildInlineSpaceRef(spaceId: string, isDm: boolean): any[] {
   return isDm ? [null, null, [spaceId]] : [[spaceId]];
+}
+
+// Feature flags observed consistently across all create_message and create_topic requests.
+// Captured from HAR: position [99][4] in the 100-element request body.
+const GCHAT_FEATURE_FLAGS = [
+  null, null, null, null, 2, 2, null, 2, 2, 2, 2, null, null, null, null, 2, 2,
+  2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, null, null, 2, 2, null, null, null, 2, 2,
+  null, null, null, null, 2, 2, 2, 2, null, 2, null, null, 2, null, 2, 2, 2, 2,
+  null, 2, null, null, null, null, null, null, 2, 2,
+];
+
+/**
+ * Generate an 11-character URL-safe alphanumeric client ID matching Google Chat's format.
+ * Used at body[5] (create_message) or body[6] (create_topic) for deduplication.
+ */
+function generateClientId(): string {
+  return randomBytes(8).toString('base64url');
+}
+
+/** Generate a random signed 64-bit integer string for body[99][0]. */
+function randomInt64Str(): string {
+  return randomBytes(8).readBigInt64BE().toString();
+}
+
+/** Build the required 100-element trailer at body[99]. */
+function buildApiTrailer(): any[] {
+  return [randomInt64Str(), 3, 1, 'en', GCHAT_FEATURE_FLAGS];
+}
+
+/**
+ * Build a create_message request body (100 elements) for replying to an existing thread.
+ *
+ * threadAlphaId — the alphanumeric thread root ID (e.g. "TiEyU2nEZL4")
+ * spaceRef      — space reference: [["SPACEID"]] for spaces, [null,null,["DMID"]] for DMs
+ * text          — message content
+ */
+function buildCreateMessageBody(
+  threadAlphaId: string,
+  spaceRef: any[],
+  text: string,
+): any[] {
+  const body: any[] = new Array(100).fill(null);
+  body[0] = [null, null, null, [null, threadAlphaId, spaceRef]];
+  body[1] = text;
+  body[5] = generateClientId();
+  body[6] = [1];
+  body[7] = [1];
+  body[99] = buildApiTrailer();
+  return body;
+}
+
+/**
+ * Build a create_topic request body (100 elements) for sending a new top-level message.
+ *
+ * spaceRef — space reference: [["SPACEID"]] for spaces, [null,null,["DMID"]] for DMs
+ * text     — message content
+ */
+function buildCreateTopicBody(spaceRef: any[], text: string): any[] {
+  const body: any[] = new Array(100).fill(null);
+  body[1] = text;
+  body[4] = spaceRef;
+  body[5] = [1];
+  body[6] = generateClientId();
+  body[7] = 1; // integer (not array) — differs from create_message
+  body[8] = [1];
+  body[99] = buildApiTrailer();
+  return body;
 }
 
 /**
@@ -839,44 +907,26 @@ export class GoogleChatBrowserChannel implements Channel {
   // ── Sending ───────────────────────────────────────────────────────────────
 
   async sendMessage(jid: string, text: string): Promise<void> {
-    this.sending = true;
-    const page = await this.getOrOpenPage(jid);
+    const spaceId = jid.replace('gchat:', '');
+    const isDm = (this.spaceFormats.get(spaceId) ?? 'space') === 'dm';
+    const spaceRef = buildSpaceRef(spaceId, isDm);
+    const body = buildCreateTopicBody(spaceRef, text);
+
     try {
-      const result = await page.evaluate(
-        ({ sel, t }: { sel: string; t: string }) => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const doc = (globalThis as any).document;
-          const el = doc.querySelector(sel);
-          if (!el) return 'no-input';
-          el.focus();
-          doc.execCommand('insertText', false, t);
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const KbEvent = (globalThis as any).KeyboardEvent;
-          const dispatch = (type: string) =>
-            el.dispatchEvent(
-              new KbEvent(type, {
-                key: 'Enter',
-                code: 'Enter',
-                keyCode: 13,
-                bubbles: true,
-                cancelable: true,
-              }),
-            );
-          dispatch('keydown');
-          dispatch('keypress');
-          dispatch('keyup');
-          return 'sent';
-        },
-        { sel: SELECTORS.messageInput, t: text },
-      );
-      if (result === 'no-input') throw new Error('Message input not found');
-      await page.waitForTimeout(1500);
+      const page = this.homePage;
+      if (!page) throw new Error('No home page available');
+      const resp = await this.xhrPost(page, 'create_topic', body, spaceId);
+      if (!resp) throw new Error('Empty response from create_topic');
       logger.info(
         { jid, length: text.length },
-        'Google Chat Browser: message sent',
+        'Google Chat Browser: message sent via create_topic API',
       );
-    } finally {
-      this.sending = false;
+    } catch (err) {
+      logger.error(
+        { err, jid },
+        'Google Chat Browser: create_topic API failed',
+      );
+      throw err;
     }
   }
 
@@ -885,58 +935,48 @@ export class GoogleChatBrowserChannel implements Channel {
     text: string,
     threadRootId: string,
   ): Promise<void> {
-    this.sending = true;
+    const spaceId = jid.replace('gchat:', '');
+    const isDm = (this.spaceFormats.get(spaceId) ?? 'space') === 'dm';
+    const spaceRef = buildInlineSpaceRef(spaceId, isDm);
+    const body = buildCreateMessageBody(threadRootId, spaceRef, text);
+
+    try {
+      const page = this.homePage;
+      if (!page) throw new Error('No home page available');
+      const resp = await this.xhrPost(page, 'create_message', body, spaceId);
+      if (!resp) throw new Error('Empty response from create_message');
+      logger.info(
+        { jid, threadRootId, length: text.length },
+        'Google Chat Browser: thread reply sent via API',
+      );
+    } catch (err) {
+      logger.error(
+        { err, jid, threadRootId },
+        'Google Chat Browser: create_message API failed',
+      );
+      throw err;
+    }
+  }
+
+  // Legacy DOM send path — kept for reference, no longer called.
+  // Removed in Phase 2 (API-based sending).
+  private async _domSendThreadReply(
+    jid: string,
+    text: string,
+    threadRootId: string,
+  ): Promise<void> {
     const spaceId = jid.replace('gchat:', '');
     const url = this.threadUrl(spaceId, threadRootId);
     const page = await this.getOrOpenPage(jid);
     try {
-      // Navigate directly to canonical thread URL (skips client-side redirect)
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-
-      // Wait for SPA navigation to settle on the topic path
       await page.waitForURL(`**/topic/${threadRootId}**`, { timeout: 10000 });
-
-      // Wait for the editable reply div inside the thread pane — generous timeout
-      // because thread content loads asynchronously after the SPA navigation
       const inputSel = SELECTORS.threadInput(threadRootId);
-      await page.waitForSelector(inputSel, {
-        timeout: 15000,
-        state: 'visible',
-      });
-
+      await page.waitForSelector(inputSel, { timeout: 15000, state: 'visible' });
       await page.click(inputSel);
       await page.keyboard.type(text, { delay: 20 });
       await page.keyboard.press('Enter');
       await page.waitForTimeout(1500);
-      logger.info(
-        { jid, threadRootId, length: text.length },
-        'Google Chat Browser: thread reply sent',
-      );
-
-      // Navigate back to space root so the page is ready for future sends
-      await page
-        .goto(this.roomUrl(jid), {
-          waitUntil: 'domcontentloaded',
-          timeout: 30000,
-        })
-        .catch(() => {});
-    } catch (err) {
-      logger.error(
-        { err, jid, threadRootId },
-        'Google Chat Browser: thread reply failed, falling back',
-      );
-      await page
-        .goto(this.roomUrl(jid), {
-          waitUntil: 'domcontentloaded',
-          timeout: 30000,
-        })
-        .catch(() => {});
-      await this.sendMessage(jid, text).catch((e) =>
-        logger.error(
-          { e, jid },
-          'Google Chat Browser: fallback sendMessage also failed',
-        ),
-      );
     } finally {
       this.sending = false;
     }
@@ -945,8 +985,85 @@ export class GoogleChatBrowserChannel implements Channel {
   // ── API layer ─────────────────────────────────────────────────────────────
 
   /**
+   * POST to a Google Chat API endpoint from inside the page using XMLHttpRequest.
+   * Because Google Chat monkey-patches XMLHttpRequest.prototype.open to inject the
+   * sequential ?c= counter, any XHR created inside page.evaluate() automatically gets
+   * the correct counter, cookies, and headers — identical to requests the app itself sends.
+   * Only the 4 headers that the real browser sends are included (no extra origin/referer).
+   */
+  private async xhrPost(
+    page: Page,
+    endpoint: string,
+    body: any[],
+    spaceId: string,
+  ): Promise<any> {
+    const url = `${CHAT_BASE}/u/${this.accountIndex}/api/${endpoint}`;
+    const xsrfToken = this.xsrfToken;
+
+    logger.debug(
+      { endpoint, body: JSON.stringify(body).slice(0, 500) },
+      'Google Chat Browser: XHR API request body',
+    );
+
+    const result = await page.evaluate(
+      async ({ url, body, spaceId, xsrfToken }) => {
+        return new Promise<{ status: number; text: string }>((resolve) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const xhr = new (globalThis as any).XMLHttpRequest() as {
+            open(method: string, url: string, async: boolean): void;
+            setRequestHeader(name: string, value: string): void;
+            send(body: string): void;
+            onload: (() => void) | null;
+            onerror: (() => void) | null;
+            status: number;
+            responseText: string;
+          };
+          xhr.open('POST', url, true);
+          xhr.setRequestHeader('content-type', 'application/json');
+          xhr.setRequestHeader('x-goog-chat-space-id', spaceId);
+          if (xsrfToken)
+            xhr.setRequestHeader('x-framework-xsrf-token', xsrfToken);
+          xhr.setRequestHeader('accept-language', 'en');
+          xhr.onload = () => resolve({ status: xhr.status, text: xhr.responseText });
+          xhr.onerror = () => resolve({ status: 0, text: '' });
+          xhr.send(JSON.stringify(body));
+        });
+      },
+      { url, body, spaceId, xsrfToken },
+    );
+
+    if (result.status === 0) {
+      throw new Error(`XHR network error for ${endpoint}`);
+    }
+    if (result.status < 200 || result.status >= 300) {
+      logger.error(
+        { endpoint, status: result.status, body: result.text.slice(0, 400) },
+        'Google Chat Browser: XHR API request failed',
+      );
+      throw new Error(`API ${endpoint} returned HTTP ${result.status}`);
+    }
+
+    const cleaned = result.text.replace(/^\)\]\}'\s*\n?/, '');
+    try {
+      const parsed = JSON.parse(cleaned);
+      logger.debug(
+        { endpoint, status: result.status, preview: cleaned.slice(0, 200) },
+        'Google Chat Browser: XHR API response',
+      );
+      return parsed;
+    } catch {
+      logger.warn(
+        { endpoint, status: result.status, text: result.text.slice(0, 400) },
+        'Google Chat Browser: failed to parse XHR API response',
+      );
+      return null;
+    }
+  }
+
+  /**
    * Make an authenticated POST to the Google Chat API.
    * Uses context.request which shares cookies with the browser context.
+   * Used for read operations (list_topics, etc.) where the ?c= counter doesn't matter.
    */
   private async apiPost(
     endpoint: string,
@@ -963,19 +1080,38 @@ export class GoogleChatBrowserChannel implements Channel {
     if (this.xsrfToken) headers['x-framework-xsrf-token'] = this.xsrfToken;
     if (spaceId) headers['x-goog-chat-space-id'] = spaceId;
 
+    logger.debug(
+      { endpoint, body: JSON.stringify(body).slice(0, 500) },
+      'Google Chat Browser: API request body',
+    );
+
     const resp = await this.context.request.post(url, {
       headers,
       data: JSON.stringify(body),
     });
 
     const text = await resp.text();
+
+    if (!resp.ok()) {
+      logger.error(
+        { endpoint, status: resp.status(), body: text.slice(0, 400) },
+        'Google Chat Browser: API request failed',
+      );
+      throw new Error(`API ${endpoint} returned HTTP ${resp.status()}`);
+    }
+
     // Google APIs prefix responses with )]}'\n to prevent JSON hijacking
     const cleaned = text.replace(/^\)\]\}'\s*\n?/, '');
     try {
-      return JSON.parse(cleaned);
-    } catch {
+      const parsed = JSON.parse(cleaned);
       logger.debug(
-        { endpoint, text: text.slice(0, 200) },
+        { endpoint, status: resp.status(), preview: cleaned.slice(0, 200) },
+        'Google Chat Browser: API response',
+      );
+      return parsed;
+    } catch {
+      logger.warn(
+        { endpoint, status: resp.status(), text: text.slice(0, 400) },
         'Google Chat Browser: failed to parse API response',
       );
       return null;

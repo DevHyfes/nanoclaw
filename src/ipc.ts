@@ -8,6 +8,7 @@ import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
+import { isThreadJid, parseThreadJid } from './thread-jid.js';
 import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
@@ -74,21 +75,24 @@ export function startIpcWatcher(deps: IpcDeps): void {
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
               if (data.type === 'message' && data.chatJid && data.text) {
-                // Authorization: verify this group can send to this chatJid
-                const targetGroup = registeredGroups[data.chatJid];
-                if (
-                  isMain ||
-                  (targetGroup && targetGroup.folder === sourceGroup)
-                ) {
-                  await deps.sendMessage(data.chatJid, data.text);
+                // Authorization: target must be a registered space (or thread
+                // whose parent space is registered). Any group may post to any
+                // registered channel — the user controls which channels are registered.
+                const targetJid: string = data.chatJid;
+                const spaceJid = isThreadJid(targetJid)
+                  ? parseThreadJid(targetJid).parentJid
+                  : targetJid;
+                const targetGroup = registeredGroups[spaceJid];
+                if (isMain || targetGroup) {
+                  await deps.sendMessage(targetJid, data.text);
                   logger.info(
-                    { chatJid: data.chatJid, sourceGroup },
+                    { chatJid: targetJid, spaceJid, sourceGroup },
                     'IPC message sent',
                   );
                 } else {
                   logger.warn(
-                    { chatJid: data.chatJid, sourceGroup },
-                    'Unauthorized IPC message attempt blocked',
+                    { chatJid: targetJid, spaceJid, sourceGroup },
+                    'Unauthorized IPC message attempt blocked (space not registered)',
                   );
                 }
               }

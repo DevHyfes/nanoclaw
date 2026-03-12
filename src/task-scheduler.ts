@@ -8,6 +8,7 @@ import {
   runContainerAgent,
   writeTasksSnapshot,
 } from './container-runner.js';
+import { isThreadJid, parseThreadJid } from './thread-jid.js';
 import {
   getAllTasks,
   getDueTasks,
@@ -176,6 +177,9 @@ async function runTask(
         sessionId,
         groupFolder: task.group_folder,
         chatJid: task.chat_jid,
+        parentJid: isThreadJid(task.chat_jid)
+          ? parseThreadJid(task.chat_jid).parentJid
+          : task.chat_jid,
         isMain,
         isScheduledTask: true,
         assistantName: ASSISTANT_NAME,

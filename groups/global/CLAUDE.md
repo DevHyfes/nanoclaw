@@ -47,11 +47,69 @@ When you learn something important:
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
-## Conversation Isolation
+## Channels and Threads
 
-Each thread is a separate conversation. When you respond, you are responding within
-that specific conversation — routing to the correct thread is handled automatically.
-You do not need to use any special prefixes.
+You operate across multiple channels (spaces) and threads. Understanding where you are
+and how to route messages is a core part of your job.
+
+### Where you are right now
+
+Two environment variables describe your current position:
+- `NANOCLAW_CHAT_JID` — the exact thread or channel you are responding in
+- `NANOCLAW_PARENT_JID` — the parent channel (space) containing that thread
+
+If `NANOCLAW_CHAT_JID` contains `:thread:`, you are inside a thread. The part before
+`:thread:` is the channel, and the alphanumeric ID after it is the thread root ID (which
+is also the numeric message ID of the first message in that thread, encoded differently).
+
+Examples:
+- `gchat:tgyvmSAAAAE` — you are in the main feed of this DM space
+- `gchat:tgyvmSAAAAE:thread:fyJS8TERc3U` — you are in thread `fyJS8TERc3U` inside that DM space
+- `gchat:AAQAz3ygP54:thread:FJUvNsFQ88U` — you are in a thread inside the Olympus channel
+
+### All channels you operate in
+
+Read `/workspace/ipc/available_groups.json` to see every registered channel — its JID,
+display name, and last activity. This is your complete routing menu.
+
+### Posting to a destination
+
+By default `mcp__nanoclaw__send_message` replies in your current thread. Pass an explicit
+`jid` to post somewhere else:
+
+- *Reply in current thread (default)*: omit `jid`
+- *New top-level message in parent channel*: `jid = NANOCLAW_PARENT_JID`
+- *New top-level message in another channel*: `jid = that channel's JID from available_groups.json`
+- *Post in a specific thread*: `jid = "gchat:SPACEID:thread:ALPHAID"`
+
+### Understanding Google Chat URLs
+
+When a user shares a Google Chat link, parse it like this:
+
+```
+https://chat.google.com/{dm|room}/{SPACE_ID}/{THREAD_ROOT_ALPHAID}/{MESSAGE_ALPHAID}
+```
+
+- `dm` vs `room` — DM space vs named channel (doesn't affect JID format)
+- `SPACE_ID` — maps to `gchat:SPACE_ID`
+- `THREAD_ROOT_ALPHAID` — the alphanumeric ID of the thread's root message
+- `MESSAGE_ALPHAID` — the specific message clicked
+
+When `THREAD_ROOT_ALPHAID == MESSAGE_ALPHAID`, it's the root/first message of that thread
+(or a standalone main-chat message with no replies yet).
+When they differ, it's a reply within a thread.
+
+The thread JID is `gchat:SPACE_ID:thread:THREAD_ROOT_ALPHAID`.
+
+Examples from actual links:
+- `/dm/tgyvmSAAAAE/fyJS8TERc3U/fyJS8TERc3U` → thread `gchat:tgyvmSAAAAE:thread:fyJS8TERc3U`
+- `/room/AAQAz3ygP54/Hk32RXHRQYo/AjHM-mOejLw` → reply in thread `gchat:AAQAz3ygP54:thread:Hk32RXHRQYo`
+
+### Convention
+
+Prefer replying in your current thread to keep conversations organized. Only post to the
+main channel feed or another channel when the user explicitly asks you to, or when it
+clearly makes sense (announcements, DMs to other users, etc.).
 
 ## Message Formatting
 

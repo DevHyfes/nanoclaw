@@ -24,6 +24,7 @@ interface ContainerInput {
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
+  parentJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
@@ -419,6 +420,7 @@ async function runQuery(
           args: [mcpServerPath],
           env: {
             NANOCLAW_CHAT_JID: containerInput.chatJid,
+            NANOCLAW_PARENT_JID: containerInput.parentJid,
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },

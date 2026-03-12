@@ -361,7 +361,7 @@ async function runAgent(
     })),
   );
 
-  // Update available groups snapshot (main group only can see all groups)
+  // Update available groups snapshot (all groups see all registered groups)
   const availableGroups = getAvailableGroups();
   writeGroupsSnapshot(
     group.folder,
@@ -369,6 +369,11 @@ async function runAgent(
     availableGroups,
     new Set(Object.keys(registeredGroups)),
   );
+
+  // Compute parent JID: for thread JIDs extract the space; for space JIDs it's itself
+  const parentJid = isThreadJid(chatJid)
+    ? parseThreadJid(chatJid).parentJid
+    : chatJid;
 
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
@@ -389,6 +394,7 @@ async function runAgent(
         sessionId,
         groupFolder: group.folder,
         chatJid,
+        parentJid,
         isMain,
         assistantName: ASSISTANT_NAME,
       },
