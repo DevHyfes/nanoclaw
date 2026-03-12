@@ -21,6 +21,16 @@ groups/global/*
 # Secrets
 *.keys.json
 .env
+.env.local
+.env.*.local
+
+# Google OAuth / service account credential files
+client_secret_*.json
+*credentials*.json
+*-credentials.json
+token.json
+gtoken.json
+service-account*.json
 
 # Temp files
 .tmp-*
