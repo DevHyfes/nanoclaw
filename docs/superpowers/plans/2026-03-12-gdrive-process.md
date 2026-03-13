@@ -12,16 +12,15 @@
 
 ---
 
-## Prerequisite: Verify gws CLI package
+## Prerequisite: gws CLI — confirmed
 
-Before writing any code, confirm the package name and command syntax.
+`@googleworkspace/cli` v0.13.2 is real, Google-maintained, and has `gws` as its bin.
+Command syntax is `gws <service> <resource> <method> --params '<JSON>' --json '<JSON>'`.
 
-- [ ] Run `npm show @googleworkspace/cli` and check it exists and has a `gws` bin
-- [ ] If the package name is wrong, find the correct one (try `npx @google/workspace-cli --help`, search npmjs.com for "google workspace cli gws")
-- [ ] Note the exact command syntax for: auth login, sheets read, drive list/mkdir, docs get/append, gmail send/draft
-- [ ] Record findings here: _____ (fill in before proceeding)
+The repo also ships pre-written agent SKILL.md files for every service:
+https://github.com/googleworkspace/cli/tree/main/skills
 
-> **If no `gws` CLI exists:** implement the same skill using the `googleapis` Node.js library via a thin helper script (`container/gws-helper.js`) that mimics the same interface. Surface this to the user before proceeding.
+We use those directly — no hand-rolled command reference needed.
 
 ---
 
@@ -59,7 +58,52 @@ git commit -m "feat: install gws CLI in agent container"
 
 ---
 
-### Task 2: Mount Google credentials into container
+### Task 2: Pull gws agent skills from upstream repo
+
+**Files:**
+- Create: `container/skills/gws-shared/SKILL.md`
+- Create: `container/skills/gws-drive/SKILL.md`
+- Create: `container/skills/gws-docs/SKILL.md`
+- Create: `container/skills/gws-docs-write/SKILL.md`
+- Create: `container/skills/gws-sheets/SKILL.md`
+- Create: `container/skills/gws-sheets-read/SKILL.md`
+- Create: `container/skills/gws-gmail/SKILL.md`
+- Create: `container/skills/gws-gmail-send/SKILL.md`
+
+These are the official pre-written skills from `https://github.com/googleworkspace/cli/tree/main/skills`.
+We pull them at install time rather than bundling them, so they can be updated independently.
+
+- [ ] **Step 1: Pull all needed skill files**
+
+```bash
+BASE="https://raw.githubusercontent.com/googleworkspace/cli/main/skills"
+for skill in gws-shared gws-drive gws-docs gws-docs-write gws-sheets gws-sheets-read gws-gmail gws-gmail-send; do
+  mkdir -p "container/skills/$skill"
+  curl -sf "$BASE/$skill/SKILL.md" -o "container/skills/$skill/SKILL.md"
+  echo "✓ $skill"
+done
+```
+
+- [ ] **Step 2: Verify all 8 files exist and are non-empty**
+
+```bash
+for skill in gws-shared gws-drive gws-docs gws-docs-write gws-sheets gws-sheets-read gws-gmail gws-gmail-send; do
+  wc -l "container/skills/$skill/SKILL.md"
+done
+```
+
+Expected: all files have >10 lines.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add container/skills/gws-*/
+git commit -m "feat: add gws agent skills from googleworkspace/cli"
+```
+
+---
+
+### Task 4: Mount Google credentials into container
 
 **Files:**
 - Modify: `src/container-runner.ts` (function `buildVolumeMounts`, ~line 60)
@@ -204,7 +248,7 @@ git commit -m "feat: mount Google Workspace credentials into agent container"
 
 ## Chunk 2: gdrive-process Agent Skill
 
-### Task 3: Write the gdrive-process container skill
+### Task 5: Write the gdrive-process container skill
 
 **Files:**
 - Create: `container/skills/gdrive-process/SKILL.md`
@@ -230,6 +274,13 @@ allowed-tools: Bash(gws:*), Bash(mkdir:*), Bash(date:*)
 
 # Google Drive Workflow Agent Skill
 
+> **PREREQUISITES:** Read these skills before issuing any gws commands:
+> - `../gws-shared/SKILL.md` — auth, global flags, output formatting
+> - `../gws-drive/SKILL.md` — Drive file/folder operations
+> - `../gws-docs/SKILL.md` and `../gws-docs-write/SKILL.md` — read and append to Docs
+> - `../gws-sheets/SKILL.md` and `../gws-sheets-read/SKILL.md` — read spreadsheets
+> - `../gws-gmail/SKILL.md` and `../gws-gmail-send/SKILL.md` — send email
+
 You operate workflows defined in Google Drive. Each workflow has:
 - A row in the **manifest Sheet** (the process registry)
 - A **process.gdoc** (step-by-step instructions)
@@ -249,7 +300,7 @@ AGENT_WORKSPACE_MANIFEST_NAME=manifest
 ## Authentication
 
 Credentials are pre-mounted at `/home/node/.config/gws/credentials.json`.
-The `gws` CLI reads them automatically — no explicit auth step needed per run.
+See `../gws-shared/SKILL.md` for full auth details and global flags.
 
 If you get an auth error, run:
 ```bash
@@ -444,33 +495,14 @@ Log each sent email (recipient, timestamp, subject) in the log doc.
 
 ## gws Command Reference
 
-```bash
-# Auth
-gws auth status                        # Check auth state
-gws auth login                         # Re-authenticate (interactive)
+Refer to the prerequisite skills for full command syntax and examples:
+- Drive operations → `../gws-drive/SKILL.md`
+- Docs read → `../gws-docs/SKILL.md`; Docs append → `../gws-docs-write/SKILL.md`
+- Sheets read → `../gws-sheets-read/SKILL.md`; full Sheets → `../gws-sheets/SKILL.md`
+- Email send → `../gws-gmail-send/SKILL.md`; full Gmail → `../gws-gmail/SKILL.md`
+- Auth and flags → `../gws-shared/SKILL.md`
 
-# Drive
-gws drive list --parent <folder-id>    # List files in folder
-gws drive list --parent <id> --name <n> # Find by name
-gws drive mkdir --parent <id> --name <n> # Create subfolder
-gws drive get --id <file-id>           # Get file metadata
-
-# Docs
-gws docs get --id <doc-id>            # Read doc content
-gws docs create --parent <id> --name <n> # Create new doc
-gws docs append --id <id> --text "<t>" # Append text to doc
-
-# Sheets
-gws sheets get --id <sheet-id>         # Read all rows as JSON
-gws sheets append --id <id> --row "<json>" # Append a row
-
-# Gmail
-gws gmail draft --to <addr> --subject <s> --body <b>
-gws gmail send  --to <addr> --subject <s> --body <b>
-```
-
-> **Note:** Verify exact flags with `gws <command> --help` if you get errors.
-> The flags above reflect the spec's intent; actual CLI flags may differ slightly.
+If a command is unclear, run `gws <service> <resource> <method> --help` for exact flags.
 
 ---
 
@@ -501,7 +533,7 @@ git commit -m "feat: add gdrive-process container skill"
 
 ## Chunk 3: Setup and Verification
 
-### Task 4: OAuth credential setup and smoke test
+### Task 6: OAuth credential setup and smoke test
 
 These steps are run once per deployment. They are not automated.
 
@@ -547,7 +579,7 @@ Expected: Agent replies that it can't find "test-process" in the manifest, and p
 
 ---
 
-### Task 5: Update global CLAUDE.md with gdrive-process capability
+### Task 7: Update global CLAUDE.md with gdrive-process capability
 
 **Files:**
 - Modify: `groups/global/CLAUDE.md`
