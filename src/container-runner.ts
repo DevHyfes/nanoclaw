@@ -210,12 +210,14 @@ function buildVolumeMounts(
     mounts.push(...validatedMounts);
   }
 
-  // Mount Google Workspace credentials if configured
-  const gwsCreds = process.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE;
-  if (gwsCreds && fs.existsSync(gwsCreds)) {
+  // Mount Google Workspace config directory if configured.
+  // The directory contains credentials.enc, .encryption_key, and client_secret.json —
+  // all required together for gws to decrypt and refresh OAuth tokens.
+  const gwsConfigDir = process.env.GOOGLE_WORKSPACE_CLI_CONFIG_DIR;
+  if (gwsConfigDir && fs.existsSync(gwsConfigDir)) {
     mounts.push({
-      hostPath: gwsCreds,
-      containerPath: '/home/node/.config/gws/credentials.json',
+      hostPath: gwsConfigDir,
+      containerPath: '/home/node/.config/gws',
       readonly: true,
     });
   }
@@ -232,11 +234,8 @@ function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // Expose gws credentials path inside the container
-  const gwsCreds = process.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE;
-  if (gwsCreds) {
-    args.push('-e', 'GWS_CREDENTIALS_FILE=/home/node/.config/gws/credentials.json');
-  }
+  // No extra env var needed — gws discovers credentials from its default
+  // config dir (/home/node/.config/gws/) which is mounted as a directory.
 
   // Route API traffic through the credential proxy (containers never see real secrets)
   args.push(

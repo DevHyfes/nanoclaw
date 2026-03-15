@@ -87,7 +87,12 @@ vi.mock('child_process', async () => {
   };
 });
 
-import { runContainerAgent, ContainerOutput, buildVolumeMountsForTest, buildContainerArgsForTest } from './container-runner.js';
+import {
+  runContainerAgent,
+  ContainerOutput,
+  buildVolumeMountsForTest,
+  buildContainerArgsForTest,
+} from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
 
 const testGroup: RegisteredGroup = {
@@ -212,18 +217,16 @@ describe('container-runner timeout behavior', () => {
 });
 
 describe('Google credentials mount', () => {
-  const credPath = '/home/hbramlet/.config/gws/creds.json';
+  const configDir = '/home/hbramlet/.config/gws';
 
   beforeEach(() => {
-    delete process.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE;
+    delete process.env.GOOGLE_WORKSPACE_CLI_CONFIG_DIR;
     vi.mocked(fs.default.existsSync).mockReturnValue(false);
   });
 
-  it('mounts credentials file when GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE is set', () => {
-    process.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE = credPath;
-    vi.mocked(fs.default.existsSync).mockImplementation(
-      (p) => p === credPath,
-    );
+  it('mounts gws config directory when GOOGLE_WORKSPACE_CLI_CONFIG_DIR is set', () => {
+    process.env.GOOGLE_WORKSPACE_CLI_CONFIG_DIR = configDir;
+    vi.mocked(fs.default.existsSync).mockImplementation((p) => p === configDir);
 
     const mounts = buildVolumeMountsForTest(
       { folder: 'test', name: 'Test' } as RegisteredGroup,
@@ -231,30 +234,22 @@ describe('Google credentials mount', () => {
     );
 
     const credMount = mounts.find(
-      (m) => m.containerPath === '/home/node/.config/gws/credentials.json',
+      (m) => m.containerPath === '/home/node/.config/gws',
     );
     expect(credMount).toBeDefined();
-    expect(credMount?.hostPath).toBe(credPath);
+    expect(credMount?.hostPath).toBe(configDir);
     expect(credMount?.readonly).toBe(true);
   });
 
-  it('skips credentials mount when GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE is not set', () => {
+  it('skips gws mount when GOOGLE_WORKSPACE_CLI_CONFIG_DIR is not set', () => {
     const mounts = buildVolumeMountsForTest(
       { folder: 'test', name: 'Test' } as RegisteredGroup,
       false,
     );
 
     const credMount = mounts.find(
-      (m) => m.containerPath === '/home/node/.config/gws/credentials.json',
+      (m) => m.containerPath === '/home/node/.config/gws',
     );
     expect(credMount).toBeUndefined();
-  });
-
-  it('passes GWS_CREDENTIALS_FILE env var to container args when credentials are set', () => {
-    process.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE = credPath;
-
-    const args = buildContainerArgsForTest([], 'test-container');
-
-    expect(args).toContain('GWS_CREDENTIALS_FILE=/home/node/.config/gws/credentials.json');
   });
 });
