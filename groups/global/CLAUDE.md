@@ -143,6 +143,10 @@ NEVER use markdown. Only use WhatsApp/Telegram formatting:
 
 No ## headings. No [links](url). No **double stars**.
 
+## Host Environment
+
+You run inside a Docker container on an **Ubuntu (WSL2) instance on a Windows 11 host**. Do not assume macOS paths, `launchctl`, Homebrew, or other macOS-specific tooling. Use `systemctl --user` for service management and standard Linux paths (e.g. `~/.config/`, `/home/...`).
+
 ## Your Workspace
 
 Files you create are saved in `/workspace/group/`. Use this for notes, research, or anything that should persist.
