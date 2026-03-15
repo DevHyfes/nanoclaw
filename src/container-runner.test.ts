@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
+import * as fs from 'fs';
 
 // Sentinel markers must match container-runner.ts
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -86,7 +87,7 @@ vi.mock('child_process', async () => {
   };
 });
 
-import { runContainerAgent, ContainerOutput } from './container-runner.js';
+import { runContainerAgent, ContainerOutput, buildVolumeMountsForTest, buildContainerArgsForTest } from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
 
 const testGroup: RegisteredGroup = {
@@ -207,5 +208,53 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+});
+
+describe('Google credentials mount', () => {
+  const credPath = '/home/hbramlet/.config/gws/creds.json';
+
+  beforeEach(() => {
+    delete process.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE;
+    vi.mocked(fs.default.existsSync).mockReturnValue(false);
+  });
+
+  it('mounts credentials file when GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE is set', () => {
+    process.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE = credPath;
+    vi.mocked(fs.default.existsSync).mockImplementation(
+      (p) => p === credPath,
+    );
+
+    const mounts = buildVolumeMountsForTest(
+      { folder: 'test', name: 'Test' } as RegisteredGroup,
+      false,
+    );
+
+    const credMount = mounts.find(
+      (m) => m.containerPath === '/home/node/.config/gws/credentials.json',
+    );
+    expect(credMount).toBeDefined();
+    expect(credMount?.hostPath).toBe(credPath);
+    expect(credMount?.readonly).toBe(true);
+  });
+
+  it('skips credentials mount when GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE is not set', () => {
+    const mounts = buildVolumeMountsForTest(
+      { folder: 'test', name: 'Test' } as RegisteredGroup,
+      false,
+    );
+
+    const credMount = mounts.find(
+      (m) => m.containerPath === '/home/node/.config/gws/credentials.json',
+    );
+    expect(credMount).toBeUndefined();
+  });
+
+  it('passes GWS_CREDENTIALS_FILE env var to container args when credentials are set', () => {
+    process.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE = credPath;
+
+    const args = buildContainerArgsForTest([], 'test-container');
+
+    expect(args).toContain('GWS_CREDENTIALS_FILE=/home/node/.config/gws/credentials.json');
   });
 });

@@ -210,6 +210,16 @@ function buildVolumeMounts(
     mounts.push(...validatedMounts);
   }
 
+  // Mount Google Workspace credentials if configured
+  const gwsCreds = process.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE;
+  if (gwsCreds && fs.existsSync(gwsCreds)) {
+    mounts.push({
+      hostPath: gwsCreds,
+      containerPath: '/home/node/.config/gws/credentials.json',
+      readonly: true,
+    });
+  }
+
   return mounts;
 }
 
@@ -221,6 +231,12 @@ function buildContainerArgs(
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Expose gws credentials path inside the container
+  const gwsCreds = process.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE;
+  if (gwsCreds) {
+    args.push('-e', 'GWS_CREDENTIALS_FILE=/home/node/.config/gws/credentials.json');
+  }
 
   // Route API traffic through the credential proxy (containers never see real secrets)
   args.push(
@@ -264,6 +280,10 @@ function buildContainerArgs(
 
   return args;
 }
+
+// Exported for testing only
+export { buildVolumeMounts as buildVolumeMountsForTest };
+export { buildContainerArgs as buildContainerArgsForTest };
 
 export async function runContainerAgent(
   group: RegisteredGroup,
