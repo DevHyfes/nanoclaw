@@ -32,17 +32,21 @@ vi.mock('./logger.js', () => ({
 // Mock fs
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
+  const mocked = {
+    existsSync: vi.fn(() => false),
+    mkdirSync: vi.fn(),
+    writeFileSync: vi.fn(),
+    readFileSync: vi.fn(() => ''),
+    readdirSync: vi.fn(() => []),
+    statSync: vi.fn(() => ({ isDirectory: () => false })),
+    copyFileSync: vi.fn(),
+  };
   return {
     ...actual,
+    ...mocked,
     default: {
       ...actual,
-      existsSync: vi.fn(() => false),
-      mkdirSync: vi.fn(),
-      writeFileSync: vi.fn(),
-      readFileSync: vi.fn(() => ''),
-      readdirSync: vi.fn(() => []),
-      statSync: vi.fn(() => ({ isDirectory: () => false })),
-      copyFileSync: vi.fn(),
+      ...mocked,
     },
   };
 });
@@ -221,12 +225,12 @@ describe('Google credentials mount', () => {
 
   beforeEach(() => {
     delete process.env.GOOGLE_WORKSPACE_CLI_CONFIG_DIR;
-    vi.mocked(fs.default.existsSync).mockReturnValue(false);
+    vi.mocked(fs.existsSync).mockReturnValue(false);
   });
 
   it('mounts gws config directory when GOOGLE_WORKSPACE_CLI_CONFIG_DIR is set', () => {
     process.env.GOOGLE_WORKSPACE_CLI_CONFIG_DIR = configDir;
-    vi.mocked(fs.default.existsSync).mockImplementation((p) => p === configDir);
+    vi.mocked(fs.existsSync).mockImplementation((p: unknown) => p === configDir);
 
     const mounts = buildVolumeMountsForTest(
       { folder: 'test', name: 'Test' } as RegisteredGroup,
