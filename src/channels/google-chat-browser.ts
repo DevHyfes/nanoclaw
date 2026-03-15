@@ -77,10 +77,72 @@ function buildInlineSpaceRef(spaceId: string, isDm: boolean): any[] {
 // Feature flags observed consistently across all create_message and create_topic requests.
 // Captured from HAR: position [99][4] in the 100-element request body.
 const GCHAT_FEATURE_FLAGS = [
-  null, null, null, null, 2, 2, null, 2, 2, 2, 2, null, null, null, null, 2, 2,
-  2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, null, null, 2, 2, null, null, null, 2, 2,
-  null, null, null, null, 2, 2, 2, 2, null, 2, null, null, 2, null, 2, 2, 2, 2,
-  null, 2, null, null, null, null, null, null, 2, 2,
+  null,
+  null,
+  null,
+  null,
+  2,
+  2,
+  null,
+  2,
+  2,
+  2,
+  2,
+  null,
+  null,
+  null,
+  null,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  2,
+  null,
+  null,
+  2,
+  2,
+  null,
+  null,
+  null,
+  2,
+  2,
+  null,
+  null,
+  null,
+  null,
+  2,
+  2,
+  2,
+  2,
+  null,
+  2,
+  null,
+  null,
+  2,
+  null,
+  2,
+  2,
+  2,
+  2,
+  null,
+  2,
+  null,
+  null,
+  null,
+  null,
+  null,
+  null,
+  2,
+  2,
 ];
 
 /**
@@ -972,7 +1034,10 @@ export class GoogleChatBrowserChannel implements Channel {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
       await page.waitForURL(`**/topic/${threadRootId}**`, { timeout: 10000 });
       const inputSel = SELECTORS.threadInput(threadRootId);
-      await page.waitForSelector(inputSel, { timeout: 15000, state: 'visible' });
+      await page.waitForSelector(inputSel, {
+        timeout: 15000,
+        state: 'visible',
+      });
       await page.click(inputSel);
       await page.keyboard.type(text, { delay: 20 });
       await page.keyboard.press('Enter');
@@ -1024,7 +1089,8 @@ export class GoogleChatBrowserChannel implements Channel {
           if (xsrfToken)
             xhr.setRequestHeader('x-framework-xsrf-token', xsrfToken);
           xhr.setRequestHeader('accept-language', 'en');
-          xhr.onload = () => resolve({ status: xhr.status, text: xhr.responseText });
+          xhr.onload = () =>
+            resolve({ status: xhr.status, text: xhr.responseText });
           xhr.onerror = () => resolve({ status: 0, text: '' });
           xhr.send(JSON.stringify(body));
         });
