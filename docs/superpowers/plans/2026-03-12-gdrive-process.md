@@ -568,7 +568,59 @@ GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=/absolute/path/to/gws-credentials.json
 systemctl --user restart nanoclaw
 ```
 
-- [ ] **Step 5: Smoke test**
+- [ ] **Step 5: Create the "How to use gdrive-process" guide doc in the Agent Workspace**
+
+In Google Drive, inside the Agent Workspace folder, create a Google Doc named `gdrive-process guide` with the following content:
+
+```
+# How to Use gdrive-process
+
+## Overview
+gdrive-process lets Chiron execute multi-step administrative workflows you define in Google Drive.
+Each workflow has a row in the manifest Sheet and a step-by-step process doc in its own folder.
+
+## Manifest Setup
+The manifest Sheet lives in the Agent Workspace folder. Each row represents one workflow:
+
+| Column | Description |
+|--------|-------------|
+| process_name | Unique name used to invoke the workflow (/gdrive-process <name>) |
+| status | draft, active, inactive, or halt |
+| mode | editing or running |
+| gchat_channel_id | Google Chat space JID where Chiron posts updates |
+| overwatcher_name | Display name of the human who approves checkpoints |
+| overwatcher_gchat_id | Google Chat user ID of the overwatcher |
+| process_folder_id | Drive folder ID containing the process doc and run logs |
+| doc_link | URL of the process Google Doc (optional — Chiron will find it by name if blank) |
+
+## Status / Mode Lifecycle
+
+  draft + editing   →   active + editing   →   active + running
+     (build)               (trial/refine)           (autonomous)
+                                ↑                         |
+                                └──── flip to editing ────┘
+                                       (to make changes)
+
+- draft/editing: Build the workflow step by step with Chiron's help
+- active/editing: Supervised refinement of a production workflow
+- active/running: Fully autonomous — Chiron executes on schedule or when invoked
+- draft/running: Blocked — Chiron refuses; switch to editing first
+- inactive or halt: Chiron stops immediately; update the manifest to re-enable
+
+## Process Doc Format
+Create a Google Doc named "process" in the process folder. Write steps as a numbered list.
+Mark steps that need human approval with [CHECKPOINT] at the start of the line.
+
+## Each Run
+Chiron creates a timestamped subfolder (e.g. 2026-03-15_09-30-run) inside the process folder
+and writes a log doc inside it. All artifacts from the run go in that subfolder.
+
+## Invoking
+Send Chiron: /gdrive-process <process-name>
+Chiron matches the name case-insensitively against the manifest.
+```
+
+- [ ] **Step 6: Smoke test**
 
 Send Chiron a message:
 ```
