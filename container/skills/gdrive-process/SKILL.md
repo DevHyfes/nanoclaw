@@ -120,13 +120,16 @@ For `status=draft` with `mode=running`: reply "The *[PROCESS_NAME]* process is i
 ### 2a. Find the process doc file ID
 
 The `doc_link` column contains a URL like `https://docs.google.com/document/d/FILE_ID/edit`.
-Extract `FILE_ID` from the URL directly — no Drive API call needed.
+Extract `FILE_ID` from the URL directly — no Drive API call needed. Assign it to `PROCESS_DOC_ID`.
 
-If `doc_link` is empty or blank, find it by name inside the process folder:
+If `doc_link` is empty or blank, find it by name inside the process folder (substitute the real
+folder ID for `PROCESS_FOLDER_ID`):
 
 ```bash
 gws drive files list --params '{"q": "'\''PROCESS_FOLDER_ID'\'' in parents and name = '\''process'\'' and trashed = false", "fields": "files(id,name,mimeType)"}'
 ```
+
+Extract the `id` field and assign it to `PROCESS_DOC_ID`.
 
 ### 2b. Fetch the process doc content
 
@@ -137,7 +140,7 @@ gws docs documents get --params '{"documentId": "PROCESS_DOC_ID"}'
 Parse the returned document body to extract the full text. Note whether the doc is blank
 (no body content) or populated.
 
-**If the doc is missing** (file not found): reply "I couldn't find the process doc for *[PROCESS_NAME]*. Please create a `process.gdoc` in the process folder at https://drive.google.com/drive/folders/PROCESS_FOLDER_ID and try again." Stop.
+**If the doc is missing** (file not found): reply "I couldn't find the process doc for *[PROCESS_NAME]*. Please create a Google Doc named `process` in the process folder at https://drive.google.com/drive/folders/PROCESS_FOLDER_ID and try again." Stop.
 
 ---
 
@@ -151,6 +154,9 @@ run subfolder and log doc. Do this before taking any other action.
 Use the current UTC time formatted as `YYYY-MM-DD_HH-MM`. Example: `2026-03-15_09-30`.
 
 ### 3b. Create the run subfolder
+
+Substitute the actual timestamp computed in Step 3a for `YYYY-MM-DD_HH-MM`, and the real
+folder ID for `PROCESS_FOLDER_ID`:
 
 ```bash
 gws drive files create --json '{"name": "YYYY-MM-DD_HH-MM-run", "mimeType": "application/vnd.google-apps.folder", "parents": ["PROCESS_FOLDER_ID"]}'
@@ -400,12 +406,9 @@ the `files.create` call or use `files.update` to reparent an existing file.
 
 Scheduled runs are configured via NanoClaw's task scheduler. At the start of every
 scheduled invocation, re-read the manifest (Step 0) to confirm `status=active` and
-`mode=running`. If the manifest shows any other state, skip the run and log a note
-without sending any chat message:
-
-```bash
-gws docs +write --document LOG_DOC_ID --text "[HH:MM UTC] Scheduled run skipped. Manifest status: STATUS / mode: MODE"
-```
+`mode=running`. If the manifest shows any other state, skip the run silently — do not
+send any chat message and do not create a run folder or log doc. The skip is silent by
+design.
 
 ---
 
