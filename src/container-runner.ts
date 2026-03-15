@@ -26,6 +26,7 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
+import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -213,7 +214,9 @@ function buildVolumeMounts(
   // Mount Google Workspace config directory if configured.
   // The directory contains credentials.enc, .encryption_key, and client_secret.json —
   // all required together for gws to decrypt and refresh OAuth tokens.
-  const gwsConfigDir = process.env.GOOGLE_WORKSPACE_CLI_CONFIG_DIR;
+  const gwsConfigDir =
+    readEnvFile(['GOOGLE_WORKSPACE_CLI_CONFIG_DIR'])
+      .GOOGLE_WORKSPACE_CLI_CONFIG_DIR;
   if (gwsConfigDir && fs.existsSync(gwsConfigDir)) {
     mounts.push({
       hostPath: gwsConfigDir,

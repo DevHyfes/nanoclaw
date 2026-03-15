@@ -56,6 +56,16 @@ vi.mock('./mount-security.js', () => ({
   validateAdditionalMounts: vi.fn(() => []),
 }));
 
+// Mock env
+const mockEnvValues: Record<string, string> = {};
+vi.mock('./env.js', () => ({
+  readEnvFile: vi.fn((keys: string[]) => {
+    const result: Record<string, string> = {};
+    for (const k of keys) if (mockEnvValues[k]) result[k] = mockEnvValues[k];
+    return result;
+  }),
+}));
+
 // Create a controllable fake ChildProcess
 function createFakeProcess() {
   const proc = new EventEmitter() as EventEmitter & {
@@ -224,13 +234,15 @@ describe('Google credentials mount', () => {
   const configDir = '/home/hbramlet/.config/gws';
 
   beforeEach(() => {
-    delete process.env.GOOGLE_WORKSPACE_CLI_CONFIG_DIR;
+    delete mockEnvValues.GOOGLE_WORKSPACE_CLI_CONFIG_DIR;
     vi.mocked(fs.existsSync).mockReturnValue(false);
   });
 
   it('mounts gws config directory when GOOGLE_WORKSPACE_CLI_CONFIG_DIR is set', () => {
-    process.env.GOOGLE_WORKSPACE_CLI_CONFIG_DIR = configDir;
-    vi.mocked(fs.existsSync).mockImplementation((p: unknown) => p === configDir);
+    mockEnvValues.GOOGLE_WORKSPACE_CLI_CONFIG_DIR = configDir;
+    vi.mocked(fs.existsSync).mockImplementation(
+      (p: unknown) => p === configDir,
+    );
 
     const mounts = buildVolumeMountsForTest(
       { folder: 'test', name: 'Test' } as RegisteredGroup,
