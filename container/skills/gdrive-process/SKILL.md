@@ -26,9 +26,9 @@ Read all of the following skills before executing any commands in this skill:
 These values are stamped at install time. Do not change them at runtime.
 
 ```
-AGENT_NAME=<display name of the agent, e.g. "Chiron">
-AGENT_GOOGLE_ACCOUNT=<agent's Gmail address, e.g. chiron.t606@gmail.com>
-AGENT_WORKSPACE_FOLDER_ID=<Google Drive folder ID of the Agent Workspace>
+AGENT_NAME=Chiron
+AGENT_GOOGLE_ACCOUNT=chiron.t606@gmail.com
+AGENT_WORKSPACE_FOLDER_ID=1Cb4TPxQCt0TveS526ZJXCZP7Mlqk_kvE
 AGENT_WORKSPACE_MANIFEST_NAME=manifest
 ```
 
