@@ -151,6 +151,10 @@ You run inside a Docker container on an **Ubuntu (WSL2) instance on a Windows 11
 
 Files you create are saved in `/workspace/group/`. Use this for notes, research, or anything that should persist.
 
+### Admin channel: cross-group write access
+
+If you are running as the **admin channel** (the DM with H B Ramlet), you have writable access to all group config and memory files at `/workspace/project/groups/`. Use this to update another group's `CLAUDE.md`, create memory files, or manage group-level configuration. The rest of `/workspace/project/` is still read-only — do not attempt to modify application code there.
+
 ## Memory
 
 The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.

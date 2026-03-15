@@ -95,6 +95,16 @@ function buildVolumeMounts(
       containerPath: '/workspace/group',
       readonly: false,
     });
+
+    // Main gets writable access to the groups directory so the admin agent
+    // can update other groups' CLAUDE.md and memory files.
+    // The project root above is read-only to protect application code;
+    // this targeted writable mount shadows groups/ within that read-only tree.
+    mounts.push({
+      hostPath: GROUPS_DIR,
+      containerPath: '/workspace/project/groups',
+      readonly: false,
+    });
   } else {
     // Other groups only get their own folder
     mounts.push({
