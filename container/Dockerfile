@@ -55,7 +55,11 @@ RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/
 # Container input (prompt, group info) is passed via stdin JSON.
 # Credentials are injected by the host's credential proxy — never passed here.
 # Follow-up messages arrive via IPC files in /workspace/ipc/input/
-RUN printf '#!/bin/bash\nset -e\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\nln -s /app/node_modules /tmp/dist/node_modules\nchmod -R a-w /tmp/dist\ncat > /tmp/input.json\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+#
+# Compilation strategy: /app/dist is bind-mounted from the host (per-group).
+# We hash /app/src on startup and skip tsc if the hash matches the last build.
+# This means each group compiles exactly once; every subsequent run is instant.
+RUN printf '#!/bin/bash\nset -e\nDIST=/app/dist\nSRC_HASH=$(find /app/src -name "*.ts" | sort | xargs md5sum 2>/dev/null | md5sum | cut -d" " -f1)\nif [ -f "$DIST/index.js" ] && [ -f "$DIST/.src-hash" ] && [ "$(cat $DIST/.src-hash)" = "$SRC_HASH" ]; then\n  : # dist is up to date, skip compilation\nelse\n  echo "[entrypoint] Compiling agent-runner..." >&2\n  cd /app && npx tsc --outDir "$DIST" 2>&1 >&2\n  ln -sf /app/node_modules "$DIST/node_modules"\n  echo "$SRC_HASH" > "$DIST/.src-hash"\nfi\ncat > /tmp/input.json\nnode "$DIST/index.js" < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # Set ownership to node user (non-root) for writable directories
 RUN chown -R node:node /workspace && chmod 777 /home/node

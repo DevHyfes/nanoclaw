@@ -211,6 +211,22 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Persistent compiled output directory — survives between container runs so
+  // the entrypoint only recompiles when the source hash changes (first run or
+  // after edits). Without this, tsc runs on every message (~2-5 min on Mac).
+  const groupAgentRunnerDist = path.join(
+    DATA_DIR,
+    'sessions',
+    group.folder,
+    'agent-runner-dist',
+  );
+  fs.mkdirSync(groupAgentRunnerDist, { recursive: true });
+  mounts.push({
+    hostPath: groupAgentRunnerDist,
+    containerPath: '/app/dist',
+    readonly: false,
+  });
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
